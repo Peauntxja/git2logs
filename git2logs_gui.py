@@ -70,7 +70,7 @@ class Git2LogsGUI:
         
         # GitLab URL
         ttk.Label(main_frame, text="GitLab URL:").grid(row=row, column=0, sticky=tk.W, pady=5)
-        self.gitlab_url = tk.StringVar(value="http://gitlab.gobestsoft.cn")
+        self.gitlab_url = tk.StringVar(value="http://gitlab.example.com")
         ttk.Entry(main_frame, textvariable=self.gitlab_url, width=50).grid(
             row=row, column=1, columnspan=2, sticky=(tk.W, tk.E), pady=5)
         row += 1

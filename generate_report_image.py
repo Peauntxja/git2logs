@@ -88,8 +88,8 @@ def parse_daily_report(file_path):
                 date = gen_time.split()[0] if gen_time else '未知日期'
         
         # 提取所有项目信息
-        # 格式: ### 📦 gsgh/gsgh-front
-        #       **项目**: [gsgh-front](...)
+        # 格式: ### 📦 example-group/example-project
+        #       **项目**: [example-project](...)
         #       **提交数**: 15
         projects_dict = {}  # 使用字典去重，key为项目路径
         

@@ -14,10 +14,10 @@
 # 命令行版本示例
 # ============================================
 
-# 示例：获取 MIZUKI 今天的提交日志
-# 仓库地址：http://gitlab.gobestsoft.cn/hainan-project/hnxc-admin.git
+# 示例：获取 Example User 今天的提交日志
+# 仓库地址：http://gitlab.example.com/example-group/example-project.git
 # 分支：master
-# 提交者：MIZUKI
+# 提交者：Example User
 
 # ============================================
 # 基本用法：单项目模式
@@ -25,16 +25,16 @@
 
 # 基本用法：只需要仓库、分支、提交者（输出文件名自动使用当天日期）
 python git2logs.py \
-  --repo http://gitlab.gobestsoft.cn/hainan-project/hnxc-admin.git \
+  --repo http://gitlab.example.com/example-group/example-project.git \
   --branch master \
-  --author "MIZUKI" \
+  --author "Example User" \
   --token YOUR_ACCESS_TOKEN
 
 # 或者获取今天的提交
 python git2logs.py \
-  --repo http://gitlab.gobestsoft.cn/hainan-project/hnxc-admin.git \
+  --repo http://gitlab.example.com/example-group/example-project.git \
   --branch master \
-  --author "MIZUKI" \
+  --author "Example User" \
   --today \
   --token YOUR_ACCESS_TOKEN
 
@@ -47,8 +47,8 @@ echo "提交日志已生成（文件名格式：YYYY-MM-DD_commits_<分支名>.m
 # 扫描所有项目，获取今天的提交
 python git2logs.py \
   --scan-all \
-  --gitlab-url http://gitlab.gobestsoft.cn \
-  --author "MIZUKI" \
+  --gitlab-url http://gitlab.example.com \
+  --author "Example User" \
   --today \
   --token YOUR_ACCESS_TOKEN
 
@@ -59,8 +59,8 @@ python git2logs.py \
 # 生成开发日报格式（包含工作概览、详情、分类汇总、时间线等）
 python git2logs.py \
   --scan-all \
-  --gitlab-url http://gitlab.gobestsoft.cn \
-  --author "MIZUKI" \
+  --gitlab-url http://gitlab.example.com \
+  --author "Example User" \
   --today \
   --token YOUR_ACCESS_TOKEN \
   --daily-report
@@ -74,8 +74,8 @@ echo "开发日报已生成（文件名格式：YYYY-MM-DD_daily_report.md）"
 # 首先生成开发日报
 python git2logs.py \
   --scan-all \
-  --gitlab-url http://gitlab.gobestsoft.cn \
-  --author "MIZUKI" \
+  --gitlab-url http://gitlab.example.com \
+  --author "Example User" \
   --today \
   --token YOUR_ACCESS_TOKEN \
   --daily-report
@@ -95,8 +95,8 @@ echo "  - PNG:  2025-12-12_daily_report.png (与 HTML 显示完全一致)"
 # 获取指定日期范围的提交
 python git2logs.py \
   --scan-all \
-  --gitlab-url http://gitlab.gobestsoft.cn \
-  --author "MIZUKI" \
+  --gitlab-url http://gitlab.example.com \
+  --author "Example User" \
   --since 2025-12-01 \
   --until 2025-12-31 \
   --token YOUR_ACCESS_TOKEN \

@@ -41,7 +41,7 @@ python3 git2logs_gui.py
 python git2logs.py \
   --repo http://gitlab.example.com/group/project.git \
   --branch master \
-  --author "MIZUKI" \
+  --author "Example User" \
   --token YOUR_TOKEN
 ```
 
@@ -51,7 +51,7 @@ python git2logs.py \
 python git2logs.py \
   --scan-all \
   --gitlab-url http://gitlab.example.com \
-  --author "MIZUKI" \
+  --author "Example User" \
   --today \
   --token YOUR_TOKEN
 ```
@@ -62,7 +62,7 @@ python git2logs.py \
 python git2logs.py \
   --scan-all \
   --gitlab-url http://gitlab.example.com \
-  --author "MIZUKI" \
+  --author "Example User" \
   --today \
   --token YOUR_TOKEN \
   --daily-report
@@ -99,8 +99,8 @@ python git2logs.py \
 ```bash
 python git2logs.py \
   --scan-all \
-  --gitlab-url http://gitlab.gobestsoft.cn \
-  --author "MIZUKI" \
+  --gitlab-url http://gitlab.example.com \
+  --author "Example User" \
   --today \
   --branch test \
   --token YOUR_TOKEN
@@ -111,8 +111,8 @@ python git2logs.py \
 ```bash
 python git2logs.py \
   --scan-all \
-  --gitlab-url http://gitlab.gobestsoft.cn \
-  --author "MIZUKI" \
+  --gitlab-url http://gitlab.example.com \
+  --author "Example User" \
   --today \
   --branch test \
   --token YOUR_TOKEN \
@@ -124,8 +124,8 @@ python git2logs.py \
 ```bash
 python git2logs.py \
   --scan-all \
-  --gitlab-url http://gitlab.gobestsoft.cn \
-  --author "MIZUKI" \
+  --gitlab-url http://gitlab.example.com \
+  --author "Example User" \
   --since 2025-12-01 \
   --until 2025-12-31 \
   --token YOUR_TOKEN

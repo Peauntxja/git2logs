@@ -15,13 +15,13 @@
 **结果**: 成功显示完整的帮助信息，包括所有参数说明和使用示例
 
 ### ✅ 2. URL 解析功能
-**测试 URL**: `http://gitlab.gobestsoft.cn/hainan-project/hnxc-admin.git`
+**测试 URL**: `http://gitlab.example.com/example-group/example-project.git`
 **结果**:
-- 项目标识符: `hainan-project/hnxc-admin` ✅
-- GitLab 实例: `http://gitlab.gobestsoft.cn` ✅
+- 项目标识符: `example-group/example-project` ✅
+- GitLab 实例: `http://gitlab.example.com` ✅
 
 ### ✅ 3. --today 参数
-**命令**: `python3 git2logs.py --repo http://gitlab.gobestsoft.cn/hainan-project/hnxc-admin.git --author "MIZUKI" --today`
+**命令**: `python3 git2logs.py --repo http://gitlab.example.com/example-group/example-project.git --author "Example User" --today`
 **结果**:
 - 正确设置日期范围为今天: `2025-12-11` ✅
 - 正确从 URL 提取 GitLab 实例地址 ✅
@@ -48,15 +48,15 @@
 
 ## 使用说明
 
-要使用此工具获取 MIZUKI 今天的提交日志，需要：
+要使用此工具获取 Example User 今天的提交日志，需要：
 
-1. 获取 GitLab 访问令牌（从 `http://gitlab.gobestsoft.cn` 的 Settings > Access Tokens）
+1. 获取 GitLab 访问令牌（从 `http://gitlab.example.com` 的 Settings > Access Tokens）
 2. 运行命令：
 
 ```bash
 python3 git2logs.py \
-  --repo http://gitlab.gobestsoft.cn/hainan-project/hnxc-admin.git \
-  --author "MIZUKI" \
+  --repo http://gitlab.example.com/example-group/example-project.git \
+  --author "Example User" \
   --today \
   --token YOUR_ACCESS_TOKEN \
   --output today_commits.md
@@ -67,8 +67,8 @@ python3 git2logs.py \
 ```bash
 export GITLAB_TOKEN=YOUR_ACCESS_TOKEN
 python3 git2logs.py \
-  --repo http://gitlab.gobestsoft.cn/hainan-project/hnxc-admin.git \
-  --author "MIZUKI" \
+  --repo http://gitlab.example.com/example-group/example-project.git \
+  --author "Example User" \
   --today \
   --output today_commits.md
 ```
