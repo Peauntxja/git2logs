@@ -8,42 +8,240 @@ __pycache__/
 dist/
 build/
 *.egg
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
 
 # PyInstaller
 *.spec
-*.pyc
+build/
+dist/
+*.app
+*.dmg
 
 # macOS
 .DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
 *.dmg
 *.app
 *.icns
 *.ico
 app_icon.*
 
-# 临时文件
-*.log
-*.tmp
-*.swp
-*~
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
 
 # IDE
 .vscode/
 .idea/
 *.iml
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# 临时文件
+*.log
+*.tmp
+*.temp
+*.bak
+*.backup
+*.old
+*.orig
+*.rej
+*.swp
+*.swo
+*~
 
 # 测试和文档
 *.html
 *.png
+*.jpg
+*.jpeg
+*.gif
 test-document/
 logs/
+test/
+tests/
+*.test.md
 
-# 环境变量
+# 环境变量和配置
 .env
 .env.local
+.env.*.local
+*.env
+config.local.*
+secrets/
+*.key
+*.pem
+*.cert
 
-# 用户数据
+# 用户数据和敏感信息
 *.md.bak
 favicon.ico
 favicon_temp.png
+*.token
+*.secret
+*_secret.*
+*_private.*
+
+# 系统文件
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Icon?
+
+# 构建产物
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# 其他临时文件
+*.cache
+.cache/
+tmp/
+temp/
+*.pid
+*.seed
+*.pid.lock
+
+# 排除父目录和系统目录
+../.bash_history
+../.gitconfig
+../.zshrc
+../.cache/
+../.config/
+../.local/
+../.ssh/
+../Downloads/
+../Desktop/
+../Documents/
+../Pictures/
+../Music/
+../Movies/
+../Library/
+../Applications/
+../.Trash/
+../.antigravity/
+../.codebuddy/
+../.cursor/
+../.cursor_pro/
+../.docker/
+../.gemini/
+../.gitflow_export
+../.gitignore_global
+../.gk/
+../.happyhackingcalendar/
+../.hgignore_global
+../.jb_crack/
+../.jenv/
+../.jetbrains.vmoptions.sh
+../.kiro/
+../.lesshst
+../.lingma/
+../.lingmaIDE/
+../.local/
+../.lyra/
+../.marscode/
+../.mini-ide/
+../.minidev/
+../.net/
+../.npm/
+../.npminstall_tarball/
+../.npmrc
+../.nrmrc
+../.nuxtrc
+../.nvm/
+../.oh-my-zsh/
+../.oomol-studio-data/
+../.oomol-studio/
+../.oracle_jre_usage/
+../.p10k.zsh
+../.p2/
+../.pnpm-state/
+../.profile
+../.proxypin/
+../.quokka/
+../.redhat/
+../.rest-client/
+../.ssh/
+../.stCommitMsg
+../.subversion/
+../.swiftpm/
+../.taro3.6/
+../.tooling/
+../.trae-aicc/
+../.trae-cn/
+../.trae/
+../.umi3/
+../.utools-xunfei-ocr/
+../.vim/
+../.viminfo
+../.vs-kubernetes/
+../.vscode-react-native/
+../.vscode/
+../.vue-templates/
+../.wget-hsts
+../.windsurf/
+../.wns/
+../.wxapplet/
+../.wxwork_local/
+../.yarnrc
+../.z
+../.zcompdump*
+../.zenmap/
+../.zlogin
+../.zlogout
+../.zprezto/
+../.zpreztorc
+../.zprofile
+../.zprofile.pysave
+../.zsh_history
+../.zsh_sessions/
+../.zshenv
+../.zshr
+../.zshrc*
+../iCloud*/
+../iTerm2-Color-Schemes/
+../jl/
+../screenshots/
+../zsh-syntax-highlighting/
+../Markdown/
+../Sunlogin/
 
