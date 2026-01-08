@@ -70,9 +70,25 @@ class Git2LogsGUI:
         
         # GitLab URL
         ttk.Label(main_frame, text="GitLab URL:").grid(row=row, column=0, sticky=tk.W, pady=5)
-        self.gitlab_url = tk.StringVar(value="http://gitlab.example.com")
-        ttk.Entry(main_frame, textvariable=self.gitlab_url, width=50).grid(
-            row=row, column=1, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        self.gitlab_url = tk.StringVar()
+        gitlab_entry = ttk.Entry(main_frame, textvariable=self.gitlab_url, width=50)
+        gitlab_entry.grid(row=row, column=1, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        # 添加提示文本（使用灰色占位符效果）
+        placeholder_text = "https://gitlab.com 或 http://gitlab.yourcompany.com"
+        self.gitlab_url.set(placeholder_text)
+        gitlab_entry.config(foreground="gray")
+        def on_gitlab_focus_in(event):
+            current_value = self.gitlab_url.get()
+            if current_value == placeholder_text:
+                self.gitlab_url.set("")
+                gitlab_entry.config(foreground="black")
+        def on_gitlab_focus_out(event):
+            current_value = self.gitlab_url.get()
+            if not current_value.strip():
+                self.gitlab_url.set(placeholder_text)
+                gitlab_entry.config(foreground="gray")
+        gitlab_entry.bind('<FocusIn>', on_gitlab_focus_in)
+        gitlab_entry.bind('<FocusOut>', on_gitlab_focus_out)
         row += 1
         
         # 仓库地址（单项目模式）
@@ -153,12 +169,15 @@ class Git2LogsGUI:
         ttk.Radiobutton(format_frame, text="开发日报 (Markdown)", 
                        variable=self.output_format, value="daily_report").grid(
             row=1, column=0, sticky=tk.W, pady=2)
+        ttk.Radiobutton(format_frame, text="统计报告 (代码统计与评分)", 
+                       variable=self.output_format, value="statistics").grid(
+            row=2, column=0, sticky=tk.W, pady=2)
         ttk.Radiobutton(format_frame, text="HTML 格式", 
                        variable=self.output_format, value="html").grid(
-            row=2, column=0, sticky=tk.W, pady=2)
+            row=3, column=0, sticky=tk.W, pady=2)
         ttk.Radiobutton(format_frame, text="PNG 图片", 
                        variable=self.output_format, value="png").grid(
-            row=3, column=0, sticky=tk.W, pady=2)
+            row=4, column=0, sticky=tk.W, pady=2)
         row += 1
         
         # 输出文件路径
@@ -286,9 +305,27 @@ class Git2LogsGUI:
     
     def validate_inputs(self):
         """验证输入"""
-        if not self.gitlab_url.get().strip():
-            messagebox.showerror("错误", "请输入 GitLab URL")
+        gitlab_url = self.gitlab_url.get().strip()
+        
+        # 检查是否是占位符文本
+        placeholder_text = "https://gitlab.com 或 http://gitlab.yourcompany.com"
+        if not gitlab_url or gitlab_url == placeholder_text:
+            messagebox.showerror("错误", "请输入真实的 GitLab URL\n\n例如：\n- https://gitlab.com\n- http://gitlab.yourcompany.com")
             return False
+        
+        # 检查是否是示例地址
+        if "gitlab.example.com" in gitlab_url.lower():
+            result = messagebox.askyesno(
+                "提示", 
+                "检测到您使用的是示例地址 'gitlab.example.com'\n\n"
+                "这是一个占位符地址，无法连接。\n\n"
+                "请使用您真实的 GitLab 实例地址，例如：\n"
+                "- https://gitlab.com\n"
+                "- http://gitlab.yourcompany.com\n\n"
+                "是否继续尝试连接？"
+            )
+            if not result:
+                return False
         
         if not self.scan_all.get() and not self.repo.get().strip():
             messagebox.showerror("错误", "请输入仓库地址或选择'自动扫描所有项目'")
@@ -336,7 +373,7 @@ class Git2LogsGUI:
             from git2logs import (
                 create_gitlab_client, scan_all_projects, get_commits_by_author,
                 group_commits_by_date, generate_markdown_log, generate_multi_project_markdown,
-                generate_daily_report, extract_gitlab_url, parse_project_identifier
+                generate_daily_report, generate_statistics_report, extract_gitlab_url, parse_project_identifier
             )
             import logging
             
@@ -360,6 +397,10 @@ class Git2LogsGUI:
             
             # 准备参数
             gitlab_url = self.gitlab_url.get().strip()
+            # 清除占位符文本
+            placeholder_text = "https://gitlab.com 或 http://gitlab.yourcompany.com"
+            if gitlab_url == placeholder_text:
+                gitlab_url = ""
             
             # 处理提交者名称格式
             author_input = self.author.get().strip()
@@ -384,6 +425,7 @@ class Git2LogsGUI:
             branch = self.branch.get().strip() if self.branch.get().strip() else None
             output_format = self.output_format.get()
             is_daily_report = (output_format == 'daily_report')
+            is_statistics = (output_format == 'statistics')
             
             # 输出文件
             output_file = self.output_file.get().strip()
@@ -393,7 +435,9 @@ class Git2LogsGUI:
                 if os.path.isdir(output_file):
                     today = datetime.now().strftime('%Y-%m-%d')
                     branch_suffix = f"_{branch}" if branch else ""
-                    if is_daily_report:
+                    if is_statistics:
+                        filename = f"{today}_statistics{branch_suffix}.md"
+                    elif is_daily_report:
                         filename = f"{today}_daily_report{branch_suffix}.md"
                     else:
                         filename = f"{today}_commits{branch_suffix}.md"
@@ -406,7 +450,9 @@ class Git2LogsGUI:
             else:
                 today = datetime.now().strftime('%Y-%m-%d')
                 branch_suffix = f"_{branch}" if branch else ""
-                if is_daily_report:
+                if is_statistics:
+                    actual_output_file = f"{today}_statistics{branch_suffix}.md"
+                elif is_daily_report:
                     actual_output_file = f"{today}_daily_report{branch_suffix}.md"
                 else:
                     actual_output_file = f"{today}_commits{branch_suffix}.md"
@@ -435,21 +481,41 @@ class Git2LogsGUI:
                 else:
                     found_commits = True
                     # 生成 Markdown
-                    if is_daily_report:
-                        markdown_content = generate_daily_report(
-                            all_results, author_to_use,
-                            since_date=since_date, until_date=until_date
-                        )
-                    else:
-                        markdown_content = generate_multi_project_markdown(
-                            all_results, author_to_use,
-                            since_date=since_date, until_date=until_date
-                        )
-                    
-                    # 保存文件
-                    with open(actual_output_file, 'w', encoding='utf-8') as f:
-                        f.write(markdown_content)
-                    self.log(f"日志已保存到: {actual_output_file}")
+                    # 生成 Markdown 内容
+                    try:
+                        if is_statistics:
+                            self.log("正在生成统计报告...")
+                            markdown_content = generate_statistics_report(
+                                all_results, author_to_use,
+                                since_date=since_date, until_date=until_date
+                            )
+                            self.log("统计报告生成完成")
+                        elif is_daily_report:
+                            self.log("正在生成开发日报...")
+                            markdown_content = generate_daily_report(
+                                all_results, author_to_use,
+                                since_date=since_date, until_date=until_date
+                            )
+                            self.log("开发日报生成完成")
+                        else:
+                            self.log("正在生成提交日志...")
+                            markdown_content = generate_multi_project_markdown(
+                                all_results, author_to_use,
+                                since_date=since_date, until_date=until_date
+                            )
+                            self.log("提交日志生成完成")
+                        
+                        # 保存文件
+                        self.log(f"正在保存文件到: {actual_output_file}")
+                        with open(actual_output_file, 'w', encoding='utf-8') as f:
+                            f.write(markdown_content)
+                        self.log(f"✓ 文件已成功保存到: {actual_output_file}")
+                        self.log(f"文件大小: {len(markdown_content)} 字符")
+                    except Exception as e:
+                        self.log(f"✗ 生成或保存文件时出错: {str(e)}")
+                        import traceback
+                        self.log(traceback.format_exc())
+                        raise
             else:
                 # 单项目模式
                 repo = self.repo.get().strip()
@@ -544,7 +610,12 @@ class Git2LogsGUI:
             else:
                 cmd.extend(['--repo', self.repo.get().strip()])
             
-            cmd.extend(['--gitlab-url', self.gitlab_url.get().strip()])
+            gitlab_url_value = self.gitlab_url.get().strip()
+            # 清除占位符文本
+            placeholder_text = "https://gitlab.com 或 http://gitlab.yourcompany.com"
+            if gitlab_url_value == placeholder_text:
+                gitlab_url_value = ""
+            cmd.extend(['--gitlab-url', gitlab_url_value])
             
             # 处理提交者名称格式（支持 "名称<邮箱>" 格式）
             author_input = self.author.get().strip()
@@ -599,7 +670,9 @@ class Git2LogsGUI:
             
             # 输出格式
             output_format = self.output_format.get()
-            if output_format == 'daily_report':
+            if output_format == 'statistics':
+                cmd.append('--statistics')
+            elif output_format == 'daily_report':
                 cmd.append('--daily-report')
             
             # 输出文件
@@ -612,7 +685,9 @@ class Git2LogsGUI:
                     # 如果是目录，自动生成文件名
                     today = datetime.now().strftime('%Y-%m-%d')
                     branch_suffix = f"_{self.branch.get().strip()}" if self.branch.get().strip() else ""
-                    if output_format == 'daily_report':
+                    if output_format == 'statistics':
+                        filename = f"{today}_statistics{branch_suffix}.md"
+                    elif output_format == 'daily_report':
                         filename = f"{today}_daily_report{branch_suffix}.md"
                     else:
                         filename = f"{today}_commits{branch_suffix}.md"
@@ -627,7 +702,9 @@ class Git2LogsGUI:
                 # 未指定输出文件，使用默认文件名（当前目录）
                 today = datetime.now().strftime('%Y-%m-%d')
                 branch_suffix = f"_{self.branch.get().strip()}" if self.branch.get().strip() else ""
-                if output_format == 'daily_report':
+                if output_format == 'statistics':
+                    actual_output_file = f"{today}_statistics{branch_suffix}.md"
+                elif output_format == 'daily_report':
                     actual_output_file = f"{today}_daily_report{branch_suffix}.md"
                 else:
                     actual_output_file = f"{today}_commits{branch_suffix}.md"
@@ -707,7 +784,9 @@ class Git2LogsGUI:
                 # 使用默认文件名（当前目录）
                 today = datetime.now().strftime('%Y-%m-%d')
                 branch_suffix = f"_{self.branch.get().strip()}" if self.branch.get().strip() else ""
-                if output_format == 'daily_report':
+                if output_format == 'statistics':
+                    output_file_path = f"{today}_statistics{branch_suffix}.md"
+                elif output_format == 'daily_report':
                     output_file_path = f"{today}_daily_report{branch_suffix}.md"
                 else:
                     output_file_path = f"{today}_commits{branch_suffix}.md"

@@ -11,6 +11,7 @@ from datetime import datetime
 from collections import defaultdict
 from urllib.parse import urlparse
 import logging
+import statistics
 
 try:
     import gitlab  # pyright: ignore[reportMissingImports]
@@ -584,6 +585,464 @@ def analyze_commit_type(commit_message):
         return ('其他', '📌')
 
 
+def get_commit_stats(project, commit):
+    """
+    获取单个提交的代码行数统计
+    
+    Args:
+        project: GitLab 项目对象
+        commit: GitLab commit 对象
+    
+    Returns:
+        dict: 包含 additions, deletions, total 的字典，如果无法获取则返回 None
+    """
+    try:
+        # 方法1: 尝试直接访问 stats 属性
+        if hasattr(commit, 'stats') and commit.stats:
+            stats = commit.stats
+            if isinstance(stats, dict):
+                return {
+                    'additions': stats.get('additions', 0),
+                    'deletions': stats.get('deletions', 0),
+                    'total': stats.get('total', 0)
+                }
+        
+        # 方法2: 尝试通过 API 获取详细 commit 信息
+        try:
+            detailed_commit = project.commits.get(commit.id)
+            if hasattr(detailed_commit, 'stats') and detailed_commit.stats:
+                stats = detailed_commit.stats
+                if isinstance(stats, dict):
+                    return {
+                        'additions': stats.get('additions', 0),
+                        'deletions': stats.get('deletions', 0),
+                        'total': stats.get('total', 0)
+                    }
+        except Exception:
+            pass
+        
+        # 方法3: 尝试通过 diff 计算（性能较低，作为最后手段）
+        try:
+            diffs = commit.diff()
+            additions = 0
+            deletions = 0
+            for diff in diffs:
+                if hasattr(diff, 'diff'):
+                    diff_text = diff.diff
+                    if diff_text:
+                        # 计算新增和删除的行数
+                        for line in diff_text.split('\n'):
+                            if line.startswith('+') and not line.startswith('+++'):
+                                additions += 1
+                            elif line.startswith('-') and not line.startswith('---'):
+                                deletions += 1
+            return {
+                'additions': additions,
+                'deletions': deletions,
+                'total': additions + deletions
+            }
+        except Exception:
+            pass
+        
+        return None
+    except Exception as e:
+        logger.debug(f"获取提交 {commit.id[:8]} 的统计信息失败: {str(e)}")
+        return None
+
+
+def calculate_code_statistics(all_results, since_date=None, until_date=None):
+    """
+    计算总体代码行数统计
+    
+    Args:
+        all_results: 按项目分组的提交字典
+        since_date: 起始日期（可选）
+        until_date: 结束日期（可选）
+    
+    Returns:
+        dict: 包含总新增行数、总删除行数、净增行数、平均每次提交代码行数等统计信息
+    """
+    total_additions = 0
+    total_deletions = 0
+    total_commits_with_stats = 0
+    total_commits = 0
+    
+    # 用于缓存已获取的统计信息，避免重复API调用
+    stats_cache = {}
+    
+    for project_path, result in all_results.items():
+        project = result['project']
+        commits = result['commits']
+        
+        for commit in commits:
+            total_commits += 1
+            
+            # 尝试从缓存获取
+            commit_id = commit.id
+            if commit_id in stats_cache:
+                stats = stats_cache[commit_id]
+            else:
+                stats = get_commit_stats(project, commit)
+                stats_cache[commit_id] = stats
+            
+            if stats:
+                total_additions += stats.get('additions', 0)
+                total_deletions += stats.get('deletions', 0)
+                total_commits_with_stats += 1
+    
+    net_lines = total_additions - total_deletions
+    avg_lines_per_commit = (total_additions + total_deletions) / total_commits_with_stats if total_commits_with_stats > 0 else 0
+    
+    return {
+        'total_additions': total_additions,
+        'total_deletions': total_deletions,
+        'net_lines': net_lines,
+        'total_commits': total_commits,
+        'commits_with_stats': total_commits_with_stats,
+        'avg_lines_per_commit': round(avg_lines_per_commit, 2),
+        'stats_availability': total_commits_with_stats / total_commits if total_commits > 0 else 0
+    }
+
+
+def calculate_scores(all_results, since_date=None, until_date=None):
+    """
+    计算5个维度的评分（满分100分）
+    
+    Args:
+        all_results: 按项目分组的提交字典
+        since_date: 起始日期（可选，格式：YYYY-MM-DD）
+        until_date: 结束日期（可选，格式：YYYY-MM-DD）
+    
+    Returns:
+        dict: 包含5个维度评分的字典
+    """
+    from collections import defaultdict
+    import statistics
+    from datetime import datetime, timedelta
+    
+    # 收集所有提交
+    all_commits = []
+    all_dates = set()
+    projects_set = set()
+    
+    # 修复类关键词
+    fix_keywords = ['fix', 'bug', '修复', '报错', '解决', 'error', 'issue', 'bugfix', 'hotfix']
+    # 功能类关键词
+    feat_keywords = ['feat', 'add', '开发', '新增', 'feature', 'implement', '实现', '开发', '添加']
+    
+    fix_commits = 0
+    feat_commits = 0
+    
+    for project_path, result in all_results.items():
+        projects_set.add(project_path)
+        commits = result['commits']
+        
+        for commit in commits:
+            all_commits.append(commit)
+            
+            # 解析日期
+            commit_date = commit.committed_date
+            if isinstance(commit_date, str):
+                date_obj = datetime.fromisoformat(commit_date.replace('Z', '+00:00'))
+            else:
+                date_obj = commit_date
+            date_str = date_obj.strftime('%Y-%m-%d')
+            all_dates.add(date_str)
+            
+            # 检查提交类型
+            commit_message = commit.message.lower()
+            is_fix = any(keyword in commit_message for keyword in fix_keywords)
+            is_feat = any(keyword in commit_message for keyword in feat_keywords)
+            
+            if is_fix:
+                fix_commits += 1
+            if is_feat:
+                feat_commits += 1
+    
+    total_commits = len(all_commits)
+    active_days = len(all_dates)
+    
+    # 确定日期范围
+    if since_date and until_date:
+        try:
+            start_date = datetime.strptime(since_date, '%Y-%m-%d')
+            end_date = datetime.strptime(until_date, '%Y-%m-%d')
+        except ValueError:
+            # 如果日期格式错误，使用实际提交的日期范围
+            if all_dates:
+                sorted_dates = sorted(all_dates)
+                start_date = datetime.strptime(sorted_dates[0], '%Y-%m-%d')
+                end_date = datetime.strptime(sorted_dates[-1], '%Y-%m-%d')
+            else:
+                start_date = datetime.now()
+                end_date = datetime.now()
+    elif all_dates:
+        sorted_dates = sorted(all_dates)
+        start_date = datetime.strptime(sorted_dates[0], '%Y-%m-%d')
+        end_date = datetime.strptime(sorted_dates[-1], '%Y-%m-%d')
+    else:
+        start_date = datetime.now()
+        end_date = datetime.now()
+    
+    total_days = (end_date - start_date).days + 1 if (end_date - start_date).days >= 0 else 1
+    
+    # 1. 勤奋度 (Diligence) - 满分100
+    # 活跃天数占比：活跃天数 / 总天数 * 50分
+    active_days_score = min(50, (active_days / total_days) * 50) if total_days > 0 else 0
+    
+    # 提交频率：(总提交数 / 总天数) / 基准频率 * 50分（基准频率：1次/天）
+    base_frequency = 1.0
+    actual_frequency = total_commits / total_days if total_days > 0 else 0
+    frequency_score = min(50, (actual_frequency / base_frequency) * 50)
+    
+    diligence_score = min(100, active_days_score + frequency_score)
+    
+    # 2. 稳定性 (Stability) - 满分100
+    # 计算每月提交数
+    monthly_commits = defaultdict(int)
+    for commit in all_commits:
+        commit_date = commit.committed_date
+        if isinstance(commit_date, str):
+            date_obj = datetime.fromisoformat(commit_date.replace('Z', '+00:00'))
+        else:
+            date_obj = commit_date
+        month_key = date_obj.strftime('%Y-%m')
+        monthly_commits[month_key] += 1
+    
+    cv = 0
+    mean_commits = 0
+    
+    if len(monthly_commits) > 0:
+        commit_counts = list(monthly_commits.values())
+        if len(commit_counts) > 1:
+            mean_commits = statistics.mean(commit_counts)
+            if mean_commits > 0:
+                std_commits = statistics.stdev(commit_counts)
+                cv = std_commits / mean_commits  # 离散系数
+                base_cv = 1.0
+                stability_score = 100 * (1 - min(1, cv / base_cv))
+            else:
+                stability_score = 0
+        else:
+            stability_score = 100  # 只有一个月，认为非常稳定
+    else:
+        stability_score = 0
+    
+    # 如果每月都有提交，给予额外加分（最多10分）
+    if since_date and until_date:
+        try:
+            start = datetime.strptime(since_date, '%Y-%m-%d')
+            end = datetime.strptime(until_date, '%Y-%m-%d')
+            expected_months = set()
+            current = start.replace(day=1)
+            while current <= end:
+                expected_months.add(current.strftime('%Y-%m'))
+                if current.month == 12:
+                    current = current.replace(year=current.year + 1, month=1)
+                else:
+                    current = current.replace(month=current.month + 1)
+            
+            actual_months = set(monthly_commits.keys())
+            if actual_months == expected_months:
+                stability_score = min(100, stability_score + 10)
+        except ValueError:
+            pass
+    
+    stability_score = max(0, min(100, stability_score))
+    
+    # 3. 解决问题能力 (Problem Solving) - 满分100
+    problem_solving_score = (fix_commits / total_commits * 100) if total_commits > 0 else 0
+    problem_solving_score = max(0, min(100, problem_solving_score))
+    
+    # 4. 功能创新力 (Feature/Innovation) - 满分100
+    feature_score = (feat_commits / total_commits * 100) if total_commits > 0 else 0
+    feature_score = max(0, min(100, feature_score))
+    
+    # 5. 多线作战能力 (Versatility) - 满分100
+    project_count = len(projects_set)
+    project_score = min(50, project_count * 10)  # 最多50分
+    
+    time_span_days = (end_date - start_date).days + 1
+    time_span_score = min(50, (time_span_days / 365) * 50)  # 最多50分
+    
+    versatility_score = project_score + time_span_score
+    versatility_score = max(0, min(100, versatility_score))
+    
+    # 计算总体评分（平均值）
+    overall_score = (diligence_score + stability_score + problem_solving_score + 
+                     feature_score + versatility_score) / 5
+    
+    return {
+        'diligence': {
+            'score': round(diligence_score, 2),
+            'active_days': active_days,
+            'total_days': total_days,
+            'total_commits': total_commits,
+            'frequency': round(actual_frequency, 2)
+        },
+        'stability': {
+            'score': round(stability_score, 2),
+            'monthly_commits': dict(monthly_commits),
+            'cv': round(cv, 3) if len(monthly_commits) > 1 and mean_commits > 0 else 0
+        },
+        'problem_solving': {
+            'score': round(problem_solving_score, 2),
+            'fix_commits': fix_commits,
+            'total_commits': total_commits,
+            'ratio': round(fix_commits / total_commits, 3) if total_commits > 0 else 0
+        },
+        'feature_innovation': {
+            'score': round(feature_score, 2),
+            'feat_commits': feat_commits,
+            'total_commits': total_commits,
+            'ratio': round(feat_commits / total_commits, 3) if total_commits > 0 else 0
+        },
+        'versatility': {
+            'score': round(versatility_score, 2),
+            'project_count': project_count,
+            'time_span_days': time_span_days
+        },
+        'overall': round(overall_score, 2)
+    }
+
+
+def generate_statistics_report(all_results, author_name, since_date=None, until_date=None):
+    """
+    生成包含统计和评分的报告
+    
+    Args:
+        all_results: 按项目分组的提交字典
+        author_name: 提交者姓名
+        since_date: 起始日期（可选）
+        until_date: 结束日期（可选）
+    
+    Returns:
+        str: Markdown 格式的统计报告内容
+    """
+    lines = []
+    
+    # 标题
+    lines.append(f"# {author_name} - 代码统计与评分报告\n")
+    lines.append(f"**生成时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+    lines.append(f"**提交者**: {author_name}\n")
+    
+    # 日期范围
+    if since_date and until_date:
+        lines.append(f"**统计时间范围**: {since_date} 至 {until_date}\n")
+    elif since_date:
+        lines.append(f"**起始日期**: {since_date}\n")
+    elif until_date:
+        lines.append(f"**结束日期**: {until_date}\n")
+    
+    lines.append("\n---\n\n")
+    
+    # 计算代码统计（可能较慢，添加异常处理）
+    code_stats = None
+    try:
+        logger.info("正在计算代码行数统计（可能需要一些时间）...")
+        code_stats = calculate_code_statistics(all_results, since_date, until_date)
+        logger.info("代码行数统计计算完成")
+    except Exception as e:
+        logger.warning(f"计算代码行数统计时出错: {str(e)}")
+        logger.warning("将跳过代码行数统计，继续生成评分报告")
+        # 创建一个默认的统计结果
+        total_commits = sum(len(result['commits']) for result in all_results.values())
+        code_stats = {
+            'total_additions': 0,
+            'total_deletions': 0,
+            'net_lines': 0,
+            'total_commits': total_commits,
+            'commits_with_stats': 0,
+            'avg_lines_per_commit': 0,
+            'stats_availability': 0
+        }
+    
+    # 代码行数统计
+    lines.append("## 📊 代码行数统计\n\n")
+    if code_stats['commits_with_stats'] > 0:
+        lines.append(f"- **总新增行数**: {code_stats['total_additions']:,}\n")
+        lines.append(f"- **总删除行数**: {code_stats['total_deletions']:,}\n")
+        lines.append(f"- **净增行数**: {code_stats['net_lines']:,}\n")
+        lines.append(f"- **总提交数**: {code_stats['total_commits']}\n")
+        lines.append(f"- **有统计信息的提交数**: {code_stats['commits_with_stats']}\n")
+        lines.append(f"- **平均每次提交代码行数**: {code_stats['avg_lines_per_commit']}\n")
+        lines.append(f"- **统计信息可用率**: {code_stats['stats_availability']:.1%}\n")
+    else:
+        lines.append(f"- **总提交数**: {code_stats['total_commits']}\n")
+        lines.append("- **代码行数统计**: 暂不可用（需要API权限或API调用失败）\n")
+        lines.append("- **提示**: 代码行数统计需要额外的API调用，可能因为权限不足或网络问题而无法获取\n")
+    lines.append("\n---\n\n")
+    
+    # 计算评分
+    try:
+        logger.info("正在计算多维度评分...")
+        scores = calculate_scores(all_results, since_date, until_date)
+        logger.info("多维度评分计算完成")
+    except Exception as e:
+        logger.error(f"计算评分时出错: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise  # 评分是核心功能，如果失败应该抛出异常
+    
+    # 评分详情
+    lines.append("## 🎯 多维度评分\n\n")
+    lines.append(f"**总体评分**: {scores['overall']:.2f} / 100\n\n")
+    
+    # 勤奋度
+    lines.append(f"### 1. 勤奋度 (Diligence): {scores['diligence']['score']:.2f} / 100\n\n")
+    lines.append(f"- 活跃天数: {scores['diligence']['active_days']} 天 / {scores['diligence']['total_days']} 天\n")
+    lines.append(f"- 总提交数: {scores['diligence']['total_commits']} 次\n")
+    lines.append(f"- 平均提交频率: {scores['diligence']['frequency']:.2f} 次/天\n")
+    lines.append(f"- 评分说明: 基于活跃天数和提交频率综合评估\n\n")
+    
+    # 稳定性
+    lines.append(f"### 2. 稳定性 (Stability): {scores['stability']['score']:.2f} / 100\n\n")
+    lines.append(f"- 月度提交分布: {len(scores['stability']['monthly_commits'])} 个月有提交\n")
+    if scores['stability']['cv'] > 0:
+        lines.append(f"- 离散系数: {scores['stability']['cv']:.3f}\n")
+    lines.append(f"- 评分说明: 基于每月提交分布的离散程度评估，离散系数越小越稳定\n\n")
+    
+    # 解决问题能力
+    lines.append(f"### 3. 解决问题能力 (Problem Solving): {scores['problem_solving']['score']:.2f} / 100\n\n")
+    lines.append(f"- 修复类提交: {scores['problem_solving']['fix_commits']} 次\n")
+    lines.append(f"- 修复类提交占比: {scores['problem_solving']['ratio']:.1%}\n")
+    lines.append(f"- 评分说明: 基于修复类提交（fix/bug/修复等关键词）的占比\n\n")
+    
+    # 功能创新力
+    lines.append(f"### 4. 功能创新力 (Feature/Innovation): {scores['feature_innovation']['score']:.2f} / 100\n\n")
+    lines.append(f"- 功能类提交: {scores['feature_innovation']['feat_commits']} 次\n")
+    lines.append(f"- 功能类提交占比: {scores['feature_innovation']['ratio']:.1%}\n")
+    lines.append(f"- 评分说明: 基于新功能开发提交（feat/add/新增等关键词）的占比\n\n")
+    
+    # 多线作战能力
+    lines.append(f"### 5. 多线作战能力 (Versatility): {scores['versatility']['score']:.2f} / 100\n\n")
+    lines.append(f"- 涉及项目数: {scores['versatility']['project_count']} 个\n")
+    lines.append(f"- 时间跨度: {scores['versatility']['time_span_days']} 天\n")
+    lines.append(f"- 评分说明: 基于同时维护的项目数量和时间跨度\n\n")
+    
+    lines.append("---\n\n")
+    
+    # 评分可视化（使用进度条）
+    lines.append("## 📈 评分可视化\n\n")
+    
+    def progress_bar(score, max_score=100, length=20):
+        """生成进度条"""
+        filled = int(score / max_score * length)
+        bar = '█' * filled + '░' * (length - filled)
+        return f"`{bar}` {score:.1f}%"
+    
+    lines.append(f"- **勤奋度**: {progress_bar(scores['diligence']['score'])}\n")
+    lines.append(f"- **稳定性**: {progress_bar(scores['stability']['score'])}\n")
+    lines.append(f"- **解决问题能力**: {progress_bar(scores['problem_solving']['score'])}\n")
+    lines.append(f"- **功能创新力**: {progress_bar(scores['feature_innovation']['score'])}\n")
+    lines.append(f"- **多线作战能力**: {progress_bar(scores['versatility']['score'])}\n")
+    lines.append(f"- **总体评分**: {progress_bar(scores['overall'])}\n")
+    
+    lines.append("\n---\n\n")
+    
+    return ''.join(lines)
+
+
 def generate_daily_report(all_results, author_name, since_date=None, until_date=None):
     """
     生成开发日报格式的 Markdown 文档
@@ -794,6 +1253,43 @@ def generate_daily_report(all_results, author_name, since_date=None, until_date=
         lines.append(f"主要工作类型为 **{main_work[0]}**（{main_work[1]} 次）。")
     
     lines.append("\n")
+    lines.append("\n---\n\n")
+    
+    # 添加代码统计和评分信息
+    try:
+        code_stats = calculate_code_statistics(all_results, since_date, until_date)
+        scores = calculate_scores(all_results, since_date, until_date)
+        
+        lines.append("## 📊 代码统计\n\n")
+        if code_stats['commits_with_stats'] > 0:
+            lines.append(f"- **总新增行数**: {code_stats['total_additions']:,}\n")
+            lines.append(f"- **总删除行数**: {code_stats['total_deletions']:,}\n")
+            lines.append(f"- **净增行数**: {code_stats['net_lines']:,}\n")
+            lines.append(f"- **平均每次提交代码行数**: {code_stats['avg_lines_per_commit']}\n")
+        else:
+            lines.append("- **代码行数统计**: 暂不可用（需要API权限）\n")
+        lines.append("\n---\n\n")
+        
+        lines.append("## 🎯 多维度评分\n\n")
+        lines.append(f"**总体评分**: {scores['overall']:.2f} / 100\n\n")
+        
+        def progress_bar(score, max_score=100, length=15):
+            """生成进度条"""
+            filled = int(score / max_score * length)
+            bar = '█' * filled + '░' * (length - filled)
+            return f"`{bar}` {score:.1f}%"
+        
+        lines.append(f"- **勤奋度**: {progress_bar(scores['diligence']['score'])} (活跃 {scores['diligence']['active_days']} 天，平均 {scores['diligence']['frequency']:.2f} 次/天)\n")
+        lines.append(f"- **稳定性**: {progress_bar(scores['stability']['score'])} ({len(scores['stability']['monthly_commits'])} 个月有提交)\n")
+        lines.append(f"- **解决问题能力**: {progress_bar(scores['problem_solving']['score'])} (修复类提交占比 {scores['problem_solving']['ratio']:.1%})\n")
+        lines.append(f"- **功能创新力**: {progress_bar(scores['feature_innovation']['score'])} (功能类提交占比 {scores['feature_innovation']['ratio']:.1%})\n")
+        lines.append(f"- **多线作战能力**: {progress_bar(scores['versatility']['score'])} ({scores['versatility']['project_count']} 个项目，跨度 {scores['versatility']['time_span_days']} 天)\n")
+        
+        lines.append("\n")
+    except Exception as e:
+        logger.warning(f"生成统计和评分信息时出错: {str(e)}")
+        lines.append("## 📊 代码统计\n\n")
+        lines.append("- **代码统计**: 生成时出现错误，请检查数据\n\n")
     
     return ''.join(lines)
 
@@ -883,6 +1379,12 @@ def main():
         help='生成开发日报格式（更详细的工作分析和分类）'
     )
     
+    parser.add_argument(
+        '--statistics',
+        action='store_true',
+        help='生成统计报告格式（包含代码行数统计和多维度评分）'
+    )
+    
     args = parser.parse_args()
     
     # 验证参数
@@ -939,7 +1441,32 @@ def main():
                 sys.exit(0)
             
             # 生成 Markdown 日志
-            if args.daily_report:
+            if args.statistics:
+                markdown_content = generate_statistics_report(
+                    all_results,
+                    args.author,
+                    since_date=args.since,
+                    until_date=args.until
+                )
+                # 确定输出文件名
+                if args.output:
+                    output_file = args.output
+                    # 检查是否是目录，如果是目录则自动生成文件名
+                    if os.path.isdir(output_file):
+                        today = datetime.now().strftime('%Y-%m-%d')
+                        branch_suffix = f"_{args.branch}" if args.branch else ""
+                        filename = f"{today}_statistics{branch_suffix}.md"
+                        output_file = os.path.join(output_file, filename)
+                        logger.info(f"输出路径是目录，自动生成文件名: {output_file}")
+                    # 如果输出文件没有扩展名，自动添加 .md
+                    elif not os.path.splitext(output_file)[1]:
+                        output_file = output_file + '.md'
+                        logger.info(f"输出文件无扩展名，自动添加 .md: {output_file}")
+                else:
+                    today = datetime.now().strftime('%Y-%m-%d')
+                    branch_suffix = f"_{args.branch}" if args.branch else ""
+                    output_file = f"{today}_statistics{branch_suffix}.md"
+            elif args.daily_report:
                 markdown_content = generate_daily_report(
                     all_results,
                     args.author,

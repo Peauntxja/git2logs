@@ -54,6 +54,7 @@ $PYINSTALLER_CMD --name="GitLab提交日志生成工具" \
     --hidden-import=tkinter.scrolledtext \
     --hidden-import=tkinter.messagebox \
     --hidden-import=tkinter.filedialog \
+    --hidden-import=statistics \
     $ICON_PARAM \
     git2logs_gui.py
 
