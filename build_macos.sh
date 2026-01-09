@@ -5,7 +5,7 @@
 set -e
 
 echo "=========================================="
-echo "GitLab 提交日志生成工具 - macOS 打包"
+echo "MIZUKI-TOOLBOX - macOS 打包"
 echo "=========================================="
 
 # 检查 PyInstaller 是否安装
@@ -52,7 +52,7 @@ fi
 
 # 使用 PyInstaller 打包
 echo "开始打包..."
-$PYINSTALLER_CMD --name="GitLab提交日志生成工具" \
+$PYINSTALLER_CMD --name="MIZUKI-TOOLBOX" \
     --windowed \
     --onefile \
     --add-data "git2logs.py:." \
@@ -80,12 +80,12 @@ $PYINSTALLER_CMD --name="GitLab提交日志生成工具" \
 # 检查是否成功
 if [ -d "dist" ]; then
     echo "✓ 打包成功！"
-    echo "可执行文件位置: dist/GitLab提交日志生成工具"
+    echo "可执行文件位置: dist/MIZUKI-TOOLBOX"
     
     # 创建 DMG（需要 hdiutil）
     if command -v hdiutil &> /dev/null; then
         echo "创建 DMG 文件..."
-        APP_NAME="GitLab提交日志生成工具"
+        APP_NAME="MIZUKI-TOOLBOX"
         DMG_NAME="${APP_NAME}.dmg"
         
         # 创建临时目录

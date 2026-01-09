@@ -240,7 +240,7 @@ class Git2LogsGUI:
             title_frame.pack_propagate(False)
             
             title_label = tk.Label(title_frame, 
-                                text="GitLab 提交日志生成工具", 
+                                text="MIZUKI-GITLAB工具箱", 
                                 font=("Helvetica Neue", 20, "bold"),
                                 bg='#0D1117',
                                 fg='#C9D1D9')

@@ -50,8 +50,9 @@ class Git2LogsGUI:
         try:
             self.root = root
             self.root.title("GitLab 提交日志生成工具")
-            self.root.geometry("800x800")
-            self.root.minsize(680, 700)
+            self.root.geometry("700x800")
+            self.root.minsize(400, 700)
+            self.root.resizable(True, True)  # 允许自由调整大小
             
             # 保存待处理的AI分析数据
             self._pending_ai_data = None
@@ -84,7 +85,7 @@ class Git2LogsGUI:
             title_frame.pack_propagate(False)
             
             title_label = ctk.CTkLabel(title_frame,
-                                     text="GitLab 提交日志生成工具",
+                                     text="MIZUKI-GITLAB工具箱",
                                      font=ctk.CTkFont(size=24, weight="bold"),
                                      text_color=self.text_primary,
                                      fg_color="transparent")
@@ -125,7 +126,7 @@ class Git2LogsGUI:
                                   hover_color="#3F3F46",
                                   corner_radius=6,
                                   height=36,
-                                  width=140,
+                                  width=120,
                                   command=lambda n=name: self._switch_tab(n),
                                   border_width=0)
                 btn.pack(side="left", padx=2, pady=4)
@@ -231,20 +232,38 @@ class Git2LogsGUI:
             # 优化：禁用画布自动更新以提高性能
             self.scroll_canvas.configure(highlightthickness=0)
             
-            # 创建所有标签页内容
-            self._create_tab1_gitlab_config()
-            self._create_tab2_date_output()
-            self._create_tab3_ai_analysis()
+            # 立即更新窗口，显示基本界面
+            root.update_idletasks()
+            root.update()
             
-            # 创建底部操作按钮区域（添加到可滚动容器中）
-            self._create_bottom_actions()
+            # 延迟创建标签页内容（使用 after 延迟执行，让窗口先显示）
+            def delayed_init():
+                try:
+                    # 创建所有标签页内容
+                    self._create_tab1_gitlab_config()
+                    root.update_idletasks()
+                    
+                    self._create_tab2_date_output()
+                    root.update_idletasks()
+                    
+                    self._create_tab3_ai_analysis()
+                    root.update_idletasks()
+                    
+                    # 创建底部操作按钮区域（添加到可滚动容器中）
+                    self._create_bottom_actions()
+                    root.update_idletasks()
+                    
+                    # 默认显示第一个标签页
+                    self._switch_tab("GitLab配置")
+                    
+                    # 初始日志
+                    self.log("欢迎使用 GitLab 提交日志生成工具！", "info")
+                    self.log("请填写参数后点击'生成日志'按钮。", "info")
+                except Exception as e:
+                    self.log(f"初始化错误: {str(e)}", "error")
             
-            # 默认显示第一个标签页
-            self._switch_tab("GitLab配置")
-            
-            # 初始日志
-            self.log("欢迎使用 GitLab 提交日志生成工具！", "info")
-            self.log("请填写参数后点击'生成日志'按钮。", "info")
+            # 延迟50ms执行，让窗口先显示出来
+            root.after(50, delayed_init)
             
         except Exception as e:
             import traceback
@@ -495,6 +514,7 @@ class Git2LogsGUI:
         date_card = ctk.CTkFrame(content, fg_color=self.bg_main, corner_radius=10)
         date_card.grid(row=row, column=0, sticky="ew", pady=(0, 20))
         date_card.columnconfigure(1, weight=1)
+        content.columnconfigure(0, weight=1)  # 确保内容容器自适应
         
         date_title = ctk.CTkLabel(date_card,
                                 text="日期范围",
@@ -517,6 +537,9 @@ class Git2LogsGUI:
         
         date_input_frame = ctk.CTkFrame(date_card, fg_color="transparent")
         date_input_frame.grid(row=date_row, column=1, sticky="ew", padx=(0, 20))
+        # 配置列权重，使两个日期输入框平均分配空间
+        date_input_frame.columnconfigure(0, weight=1, uniform="date_inputs")
+        date_input_frame.columnconfigure(1, weight=1, uniform="date_inputs")
         
         since_label = ctk.CTkLabel(date_input_frame,
                                  text="起始日期",
@@ -528,14 +551,13 @@ class Git2LogsGUI:
         self.since_entry = ctk.CTkEntry(date_input_frame,
                                       textvariable=self.since_date,
                                       font=ctk.CTkFont(size=12),
-                                      width=140,
                                       height=36,
                                       corner_radius=8,
                                       border_width=1,
                                       border_color=self.border_color,
                                       fg_color=self.bg_card,
                                       text_color=self.text_primary)
-        self.since_entry.grid(row=1, column=0, padx=(0, 20), pady=(6, 0))
+        self.since_entry.grid(row=1, column=0, padx=(0, 10), pady=(6, 0), sticky="ew")
         
         until_label = ctk.CTkLabel(date_input_frame,
                                  text="结束日期",
@@ -547,14 +569,13 @@ class Git2LogsGUI:
         self.until_entry = ctk.CTkEntry(date_input_frame,
                                       textvariable=self.until_date,
                                       font=ctk.CTkFont(size=12),
-                                      width=140,
                                       height=36,
                                       corner_radius=8,
                                       border_width=1,
                                       border_color=self.border_color,
                                       fg_color=self.bg_card,
                                       text_color=self.text_primary)
-        self.until_entry.grid(row=1, column=1, pady=(6, 0))
+        self.until_entry.grid(row=1, column=1, pady=(6, 0), sticky="ew")
         
         date_hint = ctk.CTkLabel(date_card,
                                text="提示: 日期格式为 YYYY-MM-DD，例如: 2025-12-12",
@@ -836,22 +857,25 @@ class Git2LogsGUI:
         tab3.pack_forget()
     
     def _create_bottom_actions(self):
-        """创建底部操作按钮区域（添加到可滚动容器中）"""
+        """创建底部操作按钮区域（添加到可滚动容器中，自适应窗口宽度）"""
         # 执行按钮区域
         button_container = ctk.CTkFrame(self.content_container,
                                        fg_color=self.bg_main,
-                                       height=70,
                                        corner_radius=0)
-        button_container.pack(fill="x", padx=0, pady=(20, 0))
-        button_container.pack_propagate(False)
+        button_container.pack(fill="x", padx=20, pady=(20, 0))
         
+        # 使用 grid 布局以实现自适应
         button_frame = ctk.CTkFrame(button_container, fg_color="transparent")
-        button_frame.pack(pady=15)
+        button_frame.pack(fill="x", padx=0, pady=15)
+        
+        # 配置 grid 列权重，使按钮平均分配空间
+        button_frame.grid_columnconfigure(0, weight=1, uniform="buttons")
+        button_frame.grid_columnconfigure(1, weight=1, uniform="buttons")
+        button_frame.grid_columnconfigure(2, weight=1, uniform="buttons")
         
         # 主按钮 - 绿色渐变效果（使用绿色）
         self.generate_btn = ctk.CTkButton(button_frame,
                                         text="生成日志",
-                                        width=160,
                                         height=45,
                                         font=ctk.CTkFont(size=14, weight="bold"),
                                         corner_radius=10,
@@ -859,12 +883,11 @@ class Git2LogsGUI:
                                         text_color="white",
                                         hover_color="#059669",
                                         command=self.generate_logs)
-        self.generate_btn.pack(side="left", padx=8)
+        self.generate_btn.grid(row=0, column=0, padx=8, sticky="ew")
         
         # 次要按钮
         clear_btn = ctk.CTkButton(button_frame,
                                 text="清空日志",
-                                width=160,
                                 height=45,
                                 font=ctk.CTkFont(size=14),
                                 corner_radius=10,
@@ -874,12 +897,11 @@ class Git2LogsGUI:
                                 border_width=1,
                                 border_color=self.border_color,
                                 command=self.clear_logs)
-        clear_btn.pack(side="left", padx=8)
+        clear_btn.grid(row=0, column=1, padx=8, sticky="ew")
         
         # AI分析按钮
         self.ai_analysis_btn = ctk.CTkButton(button_frame,
                                            text="执行AI分析",
-                                           width=160,
                                            height=45,
                                            font=ctk.CTkFont(size=14),
                                            corner_radius=10,
@@ -890,7 +912,43 @@ class Git2LogsGUI:
                                            border_color=self.border_color,
                                            state="normal",
                                            command=self._manual_ai_analysis)
-        self.ai_analysis_btn.pack(side="left", padx=8)
+        self.ai_analysis_btn.grid(row=0, column=2, padx=8, sticky="ew")
+        
+        # 绑定窗口大小变化事件，动态调整按钮和日期输入框字体大小
+        def on_window_resize(event=None):
+            try:
+                window_width = self.root.winfo_width()
+                if window_width < 500:
+                    # 窗口很窄时，使用更小的字体
+                    btn_font_size = 11
+                    date_font_size = 10
+                elif window_width < 600:
+                    btn_font_size = 12
+                    date_font_size = 11
+                else:
+                    btn_font_size = 14
+                    date_font_size = 12
+                
+                # 调整按钮字体
+                self.generate_btn.configure(font=ctk.CTkFont(size=btn_font_size, weight="bold"))
+                clear_btn.configure(font=ctk.CTkFont(size=btn_font_size))
+                self.ai_analysis_btn.configure(font=ctk.CTkFont(size=btn_font_size))
+                
+                # 调整日期输入框字体（如果已创建）
+                if hasattr(self, 'since_entry') and self.since_entry:
+                    self.since_entry.configure(font=ctk.CTkFont(size=date_font_size))
+                if hasattr(self, 'until_entry') and self.until_entry:
+                    self.until_entry.configure(font=ctk.CTkFont(size=date_font_size))
+            except:
+                pass
+        
+        # 保存按钮窗口大小调整函数，以便日期范围部分可以调用
+        self._on_window_resize_for_buttons = on_window_resize
+        
+        # 如果还没有绑定窗口大小变化事件，则绑定
+        if not hasattr(self, '_window_resize_bound'):
+            self.root.bind('<Configure>', on_window_resize)
+            self._window_resize_bound = True
     
     def _switch_tab(self, tab_name):
         """切换标签页（Segmented Control 风格）"""
@@ -1138,10 +1196,12 @@ class Git2LogsGUI:
             self.generate_btn.configure(state="normal")
     
     def _run_git2logs_direct(self):
-        """在后台线程中执行git2logs"""
+        """在后台线程中执行git2logs（延迟导入模块以提高启动速度）"""
         try:
             from datetime import datetime
+            import logging
             
+            # 延迟导入 git2logs 模块（只在需要时导入，提高启动速度）
             from git2logs import (
                 create_gitlab_client, scan_all_projects, get_commits_by_author,
                 group_commits_by_date, generate_markdown_log, generate_multi_project_markdown,
@@ -1149,7 +1209,6 @@ class Git2LogsGUI:
                 analyze_with_ai, generate_ai_analysis_report, generate_local_analysis_report,
                 extract_gitlab_url, parse_project_identifier
             )
-            import logging
             
             # 重定向日志输出到 GUI
             class GUILogHandler(logging.Handler):
@@ -1695,7 +1754,7 @@ class Git2LogsGUI:
 
 
 def main():
-    """主函数 - 修复启动问题"""
+    """主函数 - 优化启动速度"""
     root = None
     try:
         if not CTK_AVAILABLE:
@@ -1703,23 +1762,32 @@ def main():
             print("请运行: pip install customtkinter")
             sys.exit(1)
         
-        # 创建根窗口
+        # 创建根窗口（立即显示）
         root = ctk.CTk()
+        root.title("MIZUKI-GITLAB工具箱")
+        root.geometry("700x800")
+        root.minsize(400, 700)
+        root.resizable(True, True)
         
-        # 创建应用实例
+        # 立即更新窗口，让用户看到界面正在加载
+        root.update_idletasks()
+        root.update()
+        
+        # 设置窗口位置（在创建应用前）
+        root.update_idletasks()
+        width = root.winfo_width() or 700
+        height = root.winfo_height() or 800
+        x = (root.winfo_screenwidth() // 2) - (width // 2)
+        y = (root.winfo_screenheight() // 2) - (height // 2)
+        root.geometry(f'{width}x{height}+{x}+{y}')
+        root.update_idletasks()
+        
+        # 创建应用实例（延迟加载非关键模块）
         app = Git2LogsGUI(root)
         
         # 确保所有初始化完成
         root.update_idletasks()
         root.update()
-        
-        # 确保窗口在屏幕中央
-        root.update_idletasks()
-        width = root.winfo_width()
-        height = root.winfo_height()
-        x = (root.winfo_screenwidth() // 2) - (width // 2)
-        y = (root.winfo_screenheight() // 2) - (height // 2)
-        root.geometry(f'{width}x{height}+{x}+{y}')
         
         # 进入主循环
         root.mainloop()
