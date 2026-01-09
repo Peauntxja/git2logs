@@ -630,7 +630,7 @@ class Git2LogsGUI:
                 row=config_row, column=0, sticky=tk.W, pady=8, padx=(0, 10))
             self.ai_service = tk.StringVar(value="openai")
             ai_service_combo = ttk.Combobox(self.ai_config_frame, textvariable=self.ai_service, 
-                                       values=["openai", "anthropic", "gemini"], 
+                                       values=["openai", "anthropic", "gemini", "doubao", "deepseek"], 
                                        state="readonly", width=20)
             ai_service_combo.grid(row=config_row, column=1, sticky=tk.W, pady=8)
             config_row += 1
@@ -647,15 +647,17 @@ class Git2LogsGUI:
             def update_models(*args):
                 service = self.ai_service.get()
                 if service == "openai":
-                    ai_model_combo['values'] = ["gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"]
+                    ai_model_combo['values'] = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"]
                     if self.ai_model.get() not in ai_model_combo['values']:
-                        self.ai_model.set("gpt-4")
+                        self.ai_model.set("gpt-4o-mini")
                 elif service == "anthropic":
                     ai_model_combo['values'] = ["claude-3-5-sonnet-20241022", "claude-3-opus-20240229", "claude-3-sonnet-20240229"]
                     if self.ai_model.get() not in ai_model_combo['values']:
                         self.ai_model.set("claude-3-5-sonnet-20241022")
                 elif service == "gemini":
                     ai_model_combo['values'] = [
+                        "gemini-3-flash-preview",
+                        "gemini-3-pro-preview",
                         "gemini-2.5-pro",
                         "gemini-2.5-flash",
                         "gemini-2.5-flash-lite",
@@ -664,7 +666,15 @@ class Git2LogsGUI:
                         "gemini-1.5-flash"
                     ]
                     if self.ai_model.get() not in ai_model_combo['values']:
-                        self.ai_model.set("gemini-2.5-flash")
+                        self.ai_model.set("gemini-3-flash-preview")
+                elif service == "doubao":
+                    ai_model_combo['values'] = ["doubao-pro-128k", "doubao-lite-128k"]
+                    if self.ai_model.get() not in ai_model_combo['values']:
+                        self.ai_model.set("doubao-pro-128k")
+                elif service == "deepseek":
+                    ai_model_combo['values'] = ["deepseek-chat", "deepseek-coder", "deepseek-reasoner"]
+                    if self.ai_model.get() not in ai_model_combo['values']:
+                        self.ai_model.set("deepseek-chat")
             
             self.ai_service.trace('w', update_models)
             update_models()

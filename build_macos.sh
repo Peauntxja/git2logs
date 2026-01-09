@@ -75,7 +75,7 @@ $PYINSTALLER_CMD --name="MIZUKI-TOOLBOX" \
     --hidden-import=PIL.Image \
     --hidden-import=PIL.ImageTk \
     $ICON_PARAM \
-    git2logs_gui.py
+    git2logs_gui_ctk.py
 
 # 检查是否成功
 if [ -d "dist" ]; then

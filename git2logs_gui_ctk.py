@@ -743,7 +743,7 @@ class Git2LogsGUI:
         
         self.ai_service = ctk.StringVar(value="openai")
         ai_service_combo = ctk.CTkComboBox(self.ai_config_frame,
-                                          values=["openai", "anthropic", "gemini"],
+                                          values=["openai", "anthropic", "gemini", "doubao", "deepseek"],
                                           variable=self.ai_service,
                                           font=ctk.CTkFont(size=13),
                                           height=40,
@@ -769,9 +769,9 @@ class Git2LogsGUI:
                                  anchor="w")
         model_label.grid(row=config_row, column=0, sticky="w", padx=20, pady=(0, 8))
         
-        self.ai_model = ctk.StringVar(value="gpt-4")
+        self.ai_model = ctk.StringVar(value="gpt-4o-mini")
         self.ai_model_combo = ctk.CTkComboBox(self.ai_config_frame,
-                                             values=["gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"],
+                                             values=["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"],
                                              variable=self.ai_model,
                                              font=ctk.CTkFont(size=13),
                                              height=40,
@@ -1011,9 +1011,16 @@ class Git2LogsGUI:
         try:
             service = self.ai_service.get()
             if service == "openai":
-                models = ["gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"]
+                # 更新模型列表，添加最新模型（根据 OpenAI API 文档）
+                models = [
+                    "gpt-4o",           # 最新最强模型
+                    "gpt-4o-mini",      # 推荐：性价比高
+                    "gpt-4-turbo",
+                    "gpt-4",
+                    "gpt-3.5-turbo"
+                ]
                 if self.ai_model.get() not in models:
-                    self.ai_model.set("gpt-4")
+                    self.ai_model.set("gpt-4o-mini")  # 默认使用性价比高的模型
             elif service == "anthropic":
                 models = ["claude-3-5-sonnet-20241022", "claude-3-opus-20240229", "claude-3-sonnet-20240229"]
                 if self.ai_model.get() not in models:
@@ -1032,6 +1039,23 @@ class Git2LogsGUI:
                 ]
                 if self.ai_model.get() not in models:
                     self.ai_model.set("gemini-3-flash-preview")  # 默认使用 Gemini 3 Flash
+            elif service == "doubao":
+                # 豆包模型列表
+                models = [
+                    "doubao-pro-128k",      # 专业版
+                    "doubao-lite-128k"      # 轻量版
+                ]
+                if self.ai_model.get() not in models:
+                    self.ai_model.set("doubao-pro-128k")
+            elif service == "deepseek":
+                # DeepSeek 模型列表
+                models = [
+                    "deepseek-chat",        # 通用对话模型
+                    "deepseek-coder",       # 代码专用模型
+                    "deepseek-reasoner"     # 推理模型
+                ]
+                if self.ai_model.get() not in models:
+                    self.ai_model.set("deepseek-chat")
             
             self.ai_model_combo.configure(values=models)
         except Exception:
@@ -1722,36 +1746,75 @@ class Git2LogsGUI:
     def _test_ai_connection_thread(self):
         """在后台线程中测试AI连接"""
         try:
-            from ai_analysis import analyze_with_ai
-            import google.generativeai as genai
-            from google.api_core import exceptions as google_exceptions
-            
             service = self.ai_service.get()
             api_key = self.ai_api_key.get().strip()
             model = self.ai_model.get()
             
+            # 对于 Gemini，使用特殊测试逻辑（列出可用模型）
             if service == "gemini":
-                genai.configure(api_key=api_key)
-                models = genai.list_models()
-                available_models = []
-                for m in models:
-                    if 'embedding' not in m.name.lower():
-                        if hasattr(m, 'supported_generation_methods'):
-                            if 'generateContent' in m.supported_generation_methods:
+                try:
+                    import google.generativeai as genai
+                    genai.configure(api_key=api_key)
+                    models = genai.list_models()
+                    available_models = []
+                    for m in models:
+                        if 'embedding' not in m.name.lower():
+                            if hasattr(m, 'supported_generation_methods'):
+                                if 'generateContent' in m.supported_generation_methods:
+                                    available_models.append(m.name.split('/')[-1])
+                            else:
                                 available_models.append(m.name.split('/')[-1])
-                        else:
-                            available_models.append(m.name.split('/')[-1])
-                
-                if model in available_models:
-                    self.root.after(0, lambda: self.test_status_label.configure(
-                        text=f"连接成功，模型 {model} 可用", text_color=self.success_color))
-                else:
-                    self.root.after(0, lambda: self.test_status_label.configure(
-                        text=f"连接成功，但模型 {model} 不可用\n可用模型: {','.join(available_models[:5])}", 
-                        text_color="#F59E0B"))
+                    
+                    if model in available_models:
+                        self.root.after(0, lambda: self.test_status_label.configure(
+                            text=f"连接成功，模型 {model} 可用", text_color=self.success_color))
+                    else:
+                        self.root.after(0, lambda: self.test_status_label.configure(
+                            text=f"连接成功，但模型 {model} 不可用\n可用模型: {','.join(available_models[:5])}",
+                            text_color="#F59E0B"))
+                except Exception as e:
+                    error_msg = str(e)
+                    if "401" in error_msg or "unauthorized" in error_msg.lower() or "invalid" in error_msg.lower():
+                        self.root.after(0, lambda: self.test_status_label.configure(
+                            text="API密钥无效", text_color=self.error_color))
+                    elif "connection" in error_msg.lower() or "network" in error_msg.lower():
+                        self.root.after(0, lambda: self.test_status_label.configure(
+                            text="网络连接失败", text_color=self.error_color))
+                    else:
+                        self.root.after(0, lambda: self.test_status_label.configure(
+                            text=f"测试失败: {error_msg[:50]}", text_color=self.error_color))
             else:
-                self.root.after(0, lambda: self.test_status_label.configure(
-                    text="连接测试成功", text_color=self.success_color))
+                # 对于其他服务（OpenAI, Anthropic, Doubao, DeepSeek），进行简单连接测试
+                try:
+                    from ai_analysis import get_ai_service
+                    service_class = get_ai_service(service)
+                    # 创建一个测试实例（不实际调用API，只验证配置）
+                    test_service = service_class(api_key=api_key, model=model, timeout=5)
+                    self.root.after(0, lambda: self.test_status_label.configure(
+                        text="连接测试成功", text_color=self.success_color))
+                except ValueError as e:
+                    # 服务不存在或API Key无效
+                    error_msg = str(e)
+                    if "不支持的AI服务" in error_msg:
+                        self.root.after(0, lambda: self.test_status_label.configure(
+                            text=f"不支持的服务: {service}", text_color=self.error_color))
+                    elif "API密钥" in error_msg or "API Key" in error_msg:
+                        self.root.after(0, lambda: self.test_status_label.configure(
+                            text="API密钥无效", text_color=self.error_color))
+                    else:
+                        self.root.after(0, lambda: self.test_status_label.configure(
+                            text=f"测试失败: {error_msg[:50]}", text_color=self.error_color))
+                except Exception as e:
+                    error_msg = str(e)
+                    if "401" in error_msg or "unauthorized" in error_msg.lower() or "invalid" in error_msg.lower():
+                        self.root.after(0, lambda: self.test_status_label.configure(
+                            text="API密钥无效", text_color=self.error_color))
+                    elif "connection" in error_msg.lower() or "network" in error_msg.lower():
+                        self.root.after(0, lambda: self.test_status_label.configure(
+                            text="网络连接失败", text_color=self.error_color))
+                    else:
+                        self.root.after(0, lambda: self.test_status_label.configure(
+                            text=f"测试失败: {error_msg[:50]}", text_color=self.error_color))
                 
         except Exception as e:
             error_msg = str(e)

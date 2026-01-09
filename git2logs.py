@@ -1723,7 +1723,7 @@ def analyze_with_ai(all_results, author_name, ai_config, since_date=None, until_
         all_results: 按项目分组的提交字典
         author_name: 提交者姓名
         ai_config: AI配置字典
-            - service: 'openai', 'anthropic' 或 'gemini'
+            - service: 'openai', 'anthropic', 'gemini', 'doubao' 或 'deepseek'
             - api_key: API密钥
             - model: 模型名称（可选）
         since_date: 起始日期（可选）
