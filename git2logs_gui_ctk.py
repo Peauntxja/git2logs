@@ -1019,9 +1019,19 @@ class Git2LogsGUI:
                 if self.ai_model.get() not in models:
                     self.ai_model.set("claude-3-5-sonnet-20241022")
             elif service == "gemini":
-                models = ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5", "gemini-1.5-pro", "gemini-1.5-flash"]
+                # 更新模型列表，添加 Gemini 3 系列（推荐使用）
+                models = [
+                    "gemini-3-flash-preview",  # 推荐：有免费层级，速度快
+                    "gemini-3-pro-preview",    # 最强大，但需要配额
+                    "gemini-2.5-pro",
+                    "gemini-2.5-flash",
+                    "gemini-2.5-flash-lite",
+                    "gemini-2.5",
+                    "gemini-1.5-pro",
+                    "gemini-1.5-flash"
+                ]
                 if self.ai_model.get() not in models:
-                    self.ai_model.set("gemini-2.5-flash")
+                    self.ai_model.set("gemini-3-flash-preview")  # 默认使用 Gemini 3 Flash
             
             self.ai_model_combo.configure(values=models)
         except Exception:

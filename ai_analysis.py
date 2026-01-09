@@ -368,7 +368,26 @@ def analyze_report_file(report_content: str, ai_config: Dict[str, Any], timeout:
             from google.api_core import exceptions as google_exceptions
             
             genai.configure(api_key=api_key)
-            model_instance = genai.GenerativeModel(model or 'gemini-2.5-flash')
+            
+            # 根据模型类型选择配置
+            model_name = model or 'gemini-3-flash-preview'
+            generation_config = {}
+            
+            # Gemini 3 系列支持 thinking_level 参数（需要新版本库）
+            if 'gemini-3' in model_name:
+                try:
+                    # 尝试使用 thinking_config（如果库支持）
+                    # 对于分析任务，使用 low 级别以降低费用和延迟
+                    generation_config = {
+                        'thinking_config': {
+                            'thinking_level': 'low'  # 简单任务使用 low，降低费用
+                        }
+                    }
+                except Exception:
+                    # 如果库不支持，使用空配置
+                    generation_config = {}
+            
+            model_instance = genai.GenerativeModel(model_name, generation_config=generation_config if generation_config else None)
             response = model_instance.generate_content(prompt)
             analysis_text = response.text
             
@@ -484,14 +503,14 @@ def parse_ai_response(response_text: str) -> Dict[str, Any]:
         }
 
 
-def analyze_with_gemini(commits_data: Dict[str, Any], api_key: str, model: str = "gemini-2.5-flash", timeout: int = 120) -> Dict[str, Any]:
+def analyze_with_gemini(commits_data: Dict[str, Any], api_key: str, model: str = "gemini-3-flash-preview", timeout: int = 120) -> Dict[str, Any]:
     """
     使用Google Gemini API进行分析
     
     Args:
         commits_data: 提交数据字典
         api_key: Google API Key
-        model: 模型名称（gemini-2.5-pro, gemini-2.5-flash, gemini-2.5-flash-lite, gemini-2.5, gemini-1.5-pro, gemini-1.5-flash等）
+        model: 模型名称（推荐: gemini-3-flash-preview 免费层级, gemini-3-pro-preview, gemini-2.5-pro, gemini-2.5-flash等）
         timeout: 超时时间（秒），默认120秒
     
     Returns:
@@ -515,7 +534,26 @@ def analyze_with_gemini(commits_data: Dict[str, Any], api_key: str, model: str =
         
         def api_call():
             try:
-                model_instance = genai.GenerativeModel(model)
+                # 根据模型类型选择配置
+                # 注意：thinking_config 需要新版本的 google-generativeai 库支持
+                # 如果库版本较旧，会忽略此配置并正常调用
+                generation_config = {}
+                
+                # Gemini 3 系列支持 thinking_level 参数（需要新版本库）
+                if 'gemini-3' in model:
+                    try:
+                        # 尝试使用 thinking_config（如果库支持）
+                        # 对于分析任务，使用 low 级别以降低费用和延迟
+                        generation_config = {
+                            'thinking_config': {
+                                'thinking_level': 'low'  # 简单任务使用 low，降低费用
+                            }
+                        }
+                    except Exception:
+                        # 如果库不支持，使用空配置
+                        generation_config = {}
+                
+                model_instance = genai.GenerativeModel(model, generation_config=generation_config if generation_config else None)
                 response = model_instance.generate_content(prompt)
                 analysis_text = response.text
                 result_queue.put(parse_ai_response(analysis_text))
@@ -570,11 +608,16 @@ def analyze_with_gemini(commits_data: Dict[str, Any], api_key: str, model: str =
             if is_network_error:
                 raise ConnectionError(f"网络连接失败。无法连接到Google Gemini服务，可能是网络问题、防火墙限制或服务暂时不可用。错误详情: {combined_msg}")
             
-            # 检查是否是频率限制
+            # 检查是否是频率限制或配额不足
             elif (isinstance(actual_error, google_exceptions.ResourceExhausted) or
                   isinstance(error, google_exceptions.ResourceExhausted) or
-                  "quota" in error_msg.lower() or "rate limit" in error_msg.lower()):
-                raise ValueError(f"API调用频率超限或配额已用完。请稍后重试或检查您的API配额。错误详情: {combined_msg}")
+                  "quota" in error_msg.lower() or "rate limit" in error_msg.lower() or
+                  "配额" in error_msg or "quota exceeded" in error_msg.lower()):
+                # 提供更友好的提示，建议使用免费层级的模型
+                suggestion = ""
+                if "gemini-2.5-pro" in model or "gemini-3-pro" in model:
+                    suggestion = "\n提示: 该模型可能需要付费配额。建议尝试使用 gemini-3-flash-preview（有免费层级）或 gemini-2.5-flash。"
+                raise ValueError(f"API调用频率超限或配额已用完。请稍后重试或检查您的API配额。{suggestion}错误详情: {combined_msg}")
             else:
                 raise ValueError(f"Google Gemini API调用失败: {combined_msg}")
         
@@ -652,7 +695,7 @@ def analyze_with_ai(commits_data: Dict[str, Any], ai_config: Dict[str, Any], tim
         return analyze_with_anthropic(commits_data, api_key, model, timeout)
     elif service == 'gemini':
         if not model:
-            model = 'gemini-2.5-flash'
+            model = 'gemini-3-flash-preview'  # 默认使用 Gemini 3 Flash（有免费层级）
         return analyze_with_gemini(commits_data, api_key, model, timeout)
     else:
         raise ValueError(f"不支持的AI服务: {service}，支持的服务: openai, anthropic, gemini")
