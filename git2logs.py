@@ -129,27 +129,102 @@ def get_commits_by_author(project, author_name, since_date=None, until_date=None
             'per_page': per_page
         }
         
-        # 添加日期范围
+        # 添加日期范围（如果指定）
         if since_date:
             params['since'] = f"{since_date}T00:00:00Z"
         if until_date:
             params['until'] = f"{until_date}T23:59:59Z"
         
+        logger.debug(f"查询参数: author={author_name}, since={params.get('since')}, until={params.get('until')}, branch={branch}")
+        
         try:
+            # 首先尝试不指定作者，获取一些提交看看实际的作者格式
+            try:
+                debug_params = {'ref_name': branch, 'per_page': 5}
+                if since_date:
+                    debug_params['since'] = f"{since_date}T00:00:00Z"
+                if until_date:
+                    debug_params['until'] = f"{until_date}T23:59:59Z"
+                debug_commits = project.commits.list(**debug_params)
+                if debug_commits:
+                    logger.info("调试：查询到的提交示例（不指定作者）：")
+                    for idx, dc in enumerate(debug_commits[:3], 1):
+                        dc_author = getattr(dc, 'author_name', 'N/A')
+                        dc_email = getattr(dc, 'author_email', 'N/A')
+                        logger.info(f"  提交 {idx}: 作者='{dc_author}' 邮箱='{dc_email}'")
+            except Exception as e:
+                logger.debug(f"调试查询失败: {e}")
+            
             while True:
                 params['page'] = page
                 page_commits = project.commits.list(**params)
                 
                 if not page_commits:
+                    # 如果第一页就没有结果，尝试不同的 author 格式
+                    if page == 1:
+                        import re
+                        # 尝试提取邮箱（如果格式是 "Name <email>"）
+                        email_match = re.search(r'<([^>]+)>', author_name)
+                        if email_match:
+                            email_only = email_match.group(1)
+                            logger.info(f"尝试使用邮箱格式查询: {email_only}")
+                            params_alt = params.copy()
+                            params_alt['author'] = email_only
+                            try:
+                                page_commits_alt = project.commits.list(**params_alt)
+                                if page_commits_alt:
+                                    logger.info(f"✓ 使用邮箱格式找到 {len(page_commits_alt)} 条提交")
+                                    page_commits = page_commits_alt
+                                    params = params_alt
+                                    # 找到提交后，继续处理，不要 break
+                                else:
+                                    logger.info(f"✗ 使用邮箱格式未找到提交")
+                            except Exception as e:
+                                logger.debug(f"使用邮箱格式查询失败: {e}")
+                        
+                        # 如果邮箱格式没找到，尝试只使用名称部分（如果格式是 "Name <email>"）
+                        if not page_commits:
+                            name_match = re.match(r'^([^<]+)', author_name)
+                            if name_match:
+                                name_only = name_match.group(1).strip()
+                                if name_only and name_only != author_name:
+                                    logger.info(f"尝试使用名称格式查询: '{name_only}'")
+                                    params_alt = params.copy()
+                                    params_alt['author'] = name_only
+                                    try:
+                                        page_commits_alt = project.commits.list(**params_alt)
+                                        if page_commits_alt:
+                                            logger.info(f"✓ 使用名称格式找到 {len(page_commits_alt)} 条提交")
+                                            page_commits = page_commits_alt
+                                            params = params_alt
+                                            # 找到提交后，继续处理，不要 break
+                                        else:
+                                            logger.info(f"✗ 使用名称格式未找到提交")
+                                    except Exception as e:
+                                        logger.debug(f"使用名称格式查询失败: {e}")
+                        
+                        # 如果所有格式都失败，给出提示并退出
+                        if not page_commits:
+                            logger.warning("所有作者格式都未找到提交，可能的原因：")
+                            logger.warning("1. 该分支在指定日期范围内确实没有提交")
+                            logger.warning("2. 作者名称格式不匹配（请检查上面的示例提交作者格式）")
+                            logger.warning("3. 日期范围问题（GitLab 使用 UTC 时间）")
+                            break
+                    else:
+                        # 不是第一页，没有更多结果，退出
+                        break
+                
+                # 处理找到的提交
+                if page_commits:
+                    commits.extend(page_commits)
+                    logger.info(f"已获取 {len(commits)} 条提交记录...")
+                    
+                    if len(page_commits) < per_page:
+                        break
+                    
+                    page += 1
+                else:
                     break
-                
-                commits.extend(page_commits)
-                logger.info(f"已获取 {len(commits)} 条提交记录...")
-                
-                if len(page_commits) < per_page:
-                    break
-                
-                page += 1
             
             logger.info(f"共获取到 {len(commits)} 条提交记录")
             return commits
@@ -177,6 +252,83 @@ def get_commits_by_author(project, author_name, since_date=None, until_date=None
                 if until_date:
                     branch_params['until'] = f"{until_date}T23:59:59Z"
                 
+                # 首先尝试不指定作者，获取一些提交看看实际的作者格式（仅第一个分支）
+                if idx == 1:
+                    try:
+                        debug_params = {'ref_name': branch_obj.name, 'per_page': 20}
+                        if since_date:
+                            debug_params['since'] = f"{since_date}T00:00:00Z"
+                        if until_date:
+                            debug_params['until'] = f"{until_date}T23:59:59Z"
+                        debug_commits = project.commits.list(**debug_params)
+                        if debug_commits:
+                            logger.info(f"调试：分支 '{branch_obj.name}' 的提交示例（不指定作者，日期范围 {since_date or '全部'} 至 {until_date or '全部'}，共 {len(debug_commits)} 条）：")
+                            for dc_idx, dc in enumerate(debug_commits[:10], 1):
+                                dc_author = getattr(dc, 'author_name', 'N/A')
+                                dc_email = getattr(dc, 'author_email', 'N/A')
+                                dc_date = getattr(dc, 'committed_date', 'N/A')
+                                # 格式化日期
+                                if isinstance(dc_date, str):
+                                    try:
+                                        from datetime import datetime
+                                        dc_date_obj = datetime.fromisoformat(dc_date.replace('Z', '+00:00'))
+                                        dc_date_str = dc_date_obj.strftime('%Y-%m-%d %H:%M:%S')
+                                        dc_date_local = dc_date_obj.strftime('%Y-%m-%d')
+                                    except:
+                                        dc_date_str = str(dc_date)
+                                        dc_date_local = 'N/A'
+                                else:
+                                    dc_date_str = str(dc_date)
+                                    dc_date_local = 'N/A'
+                                # 检查是否是目标作者
+                                is_target = False
+                                if author_name.lower() in str(dc_author).lower() or author_name.lower() in str(dc_email).lower():
+                                    is_target = True
+                                marker = " ← 匹配" if is_target else ""
+                                logger.info(f"  提交 {dc_idx}: 作者='{dc_author}' 邮箱='{dc_email}' 日期={dc_date_str} (UTC日期={dc_date_local}){marker}")
+                        else:
+                            logger.warning(f"调试：分支 '{branch_obj.name}' 在指定日期范围内（{since_date or '全部'} 至 {until_date or '全部'}）没有任何提交（不指定作者）")
+                            # 如果指定了日期范围但没有找到提交，再查询一次不限制日期的，看看最近有哪些提交
+                            if since_date or until_date:
+                                logger.info(f"调试：查询分支 '{branch_obj.name}' 最近的提交（不限制日期范围）：")
+                                try:
+                                    debug_params_no_date = {'ref_name': branch_obj.name, 'per_page': 10}
+                                    debug_commits_no_date = project.commits.list(**debug_params_no_date)
+                                    if debug_commits_no_date:
+                                        logger.info(f"  找到 {len(debug_commits_no_date)} 条最近的提交：")
+                                        for dc_idx, dc in enumerate(debug_commits_no_date[:5], 1):
+                                            dc_author = getattr(dc, 'author_name', 'N/A')
+                                            dc_email = getattr(dc, 'author_email', 'N/A')
+                                            dc_date = getattr(dc, 'committed_date', 'N/A')
+                                            # 格式化日期
+                                            if isinstance(dc_date, str):
+                                                try:
+                                                    from datetime import datetime
+                                                    dc_date_obj = datetime.fromisoformat(dc_date.replace('Z', '+00:00'))
+                                                    dc_date_str = dc_date_obj.strftime('%Y-%m-%d %H:%M:%S')
+                                                    dc_date_local = dc_date_obj.strftime('%Y-%m-%d')
+                                                except:
+                                                    dc_date_str = str(dc_date)
+                                                    dc_date_local = 'N/A'
+                                            else:
+                                                dc_date_str = str(dc_date)
+                                                dc_date_local = 'N/A'
+                                            # 检查是否是目标作者
+                                            is_target = False
+                                            if author_name.lower() in str(dc_author).lower() or author_name.lower() in str(dc_email).lower():
+                                                is_target = True
+                                            marker = " ← 匹配" if is_target else ""
+                                            logger.info(f"    提交 {dc_idx}: 作者='{dc_author}' 邮箱='{dc_email}' 日期={dc_date_str} (UTC日期={dc_date_local}){marker}")
+                                        logger.info(f"  提示：如果看到匹配的提交，请检查其 UTC 日期是否在查询范围内")
+                                    else:
+                                        logger.warning(f"  该分支没有任何提交记录")
+                                except Exception as e:
+                                    logger.debug(f"查询最近提交失败: {e}")
+                            else:
+                                logger.warning(f"提示：如果确定有提交，可能是时区问题。GitLab 使用 UTC 时间，请检查提交的实际 UTC 日期")
+                    except Exception as e:
+                        logger.warning(f"调试查询失败: {e}")
+                
                 branch_commits = []
                 branch_page = 1
                 while True:
@@ -184,7 +336,44 @@ def get_commits_by_author(project, author_name, since_date=None, until_date=None
                     page_commits = project.commits.list(**branch_params)
                     
                     if not page_commits:
+                        # 如果第一页第一个分支没有结果，尝试不同的 author 格式
+                        if idx == 1 and branch_page == 1:
+                            import re
+                            email_match = re.search(r'<([^>]+)>', author_name)
+                            if email_match:
+                                email_only = email_match.group(1)
+                                logger.info(f"尝试使用邮箱格式查询分支 '{branch_obj.name}': {email_only}")
+                                branch_params_alt = branch_params.copy()
+                                branch_params_alt['author'] = email_only
+                                page_commits_alt = project.commits.list(**branch_params_alt)
+                                if page_commits_alt:
+                                    logger.info(f"使用邮箱格式找到 {len(page_commits_alt)} 条提交")
+                                    page_commits = page_commits_alt
+                                    branch_params = branch_params_alt
+                            # 尝试只使用名称部分
+                            name_match = re.match(r'^([^<]+)', author_name)
+                            if name_match and not email_match:
+                                name_only = name_match.group(1).strip()
+                                logger.info(f"尝试使用名称格式查询分支 '{branch_obj.name}': {name_only}")
+                                branch_params_alt = branch_params.copy()
+                                branch_params_alt['author'] = name_only
+                                page_commits_alt = project.commits.list(**branch_params_alt)
+                                if page_commits_alt:
+                                    logger.info(f"使用名称格式找到 {len(page_commits_alt)} 条提交")
+                                    page_commits = page_commits_alt
+                                    branch_params = branch_params_alt
                         break
+                    
+                    # 调试：显示第一条提交的作者信息（仅第一页第一个分支）
+                    if idx == 1 and branch_page == 1 and page_commits:
+                        first_commit = page_commits[0]
+                        author_info = getattr(first_commit, 'author_name', 'N/A')
+                        author_email = getattr(first_commit, 'author_email', 'N/A')
+                        logger.debug(f"示例提交作者: {author_info} <{author_email}>")
+                        # 如果作者不匹配，给出提示
+                        if author_name.lower() not in str(author_info).lower() and author_name.lower() not in str(author_email).lower():
+                            logger.warning(f"注意: 查询的作者 '{author_name}' 与返回的提交作者 '{author_info} <{author_email}>' 不匹配")
+                            logger.warning(f"建议: 尝试使用 '{author_info}' 或 '{author_email}' 作为提交者名称")
                     
                     branch_commits.extend(page_commits)
                     
@@ -196,6 +385,9 @@ def get_commits_by_author(project, author_name, since_date=None, until_date=None
                 if branch_commits:
                     logger.info(f"[{idx}/{len(branches)}] 分支 '{branch_obj.name}': 找到 {len(branch_commits)} 条提交")
                     all_commits.extend(branch_commits)
+                else:
+                    # 调试：如果没找到提交，记录一下（仅在调试模式下）
+                    logger.debug(f"[{idx}/{len(branches)}] 分支 '{branch_obj.name}': 未找到提交")
             except Exception as e:
                 # 忽略权限不足等错误
                 logger.debug(f"查询分支 '{branch_obj.name}' 时出错: {str(e)}")

@@ -50,8 +50,8 @@ class Git2LogsGUI:
         try:
             self.root = root
             self.root.title("GitLab 提交日志生成工具")
-            self.root.geometry("1000x800")
-            self.root.minsize(900, 700)
+            self.root.geometry("800x800")
+            self.root.minsize(680, 700)
             
             # 保存待处理的AI分析数据
             self._pending_ai_data = None
@@ -97,6 +97,9 @@ class Git2LogsGUI:
                                          fg_color="transparent")
             subtitle_label.pack()
             
+            # 创建日志显示区域（放在最上方）
+            self._create_log_area(main_container)
+            
             # 创建 Segmented Control 风格的标签导航
             self.tab_container = ctk.CTkFrame(main_container, fg_color=self.bg_main, height=50, corner_radius=0)
             self.tab_container.pack(fill="x", padx=20, pady=(10, 0))
@@ -139,13 +142,14 @@ class Git2LogsGUI:
                                        highlightthickness=0,
                                        borderwidth=0)
             
+            # 创建滚动条但隐藏它（宽度设为0，不显示）
             scrollbar = Scrollbar(canvas_frame,
                                 orient="vertical",
                                 command=self.scroll_canvas.yview,
-                                bg=self.bg_card,
+                                bg=self.bg_main,  # 与背景色相同，完全隐藏
                                 troughcolor=self.bg_main,
-                                activebackground=self.bg_card,
-                                width=12)
+                                activebackground=self.bg_main,
+                                width=0)  # 宽度设为0，完全隐藏
             
             self.content_container = ctk.CTkFrame(self.scroll_canvas,
                                                  fg_color=self.bg_main,
@@ -158,6 +162,8 @@ class Git2LogsGUI:
             
             # 配置滚动区域（优化性能，减少闪烁）
             self._scroll_update_timer = None
+            self._last_bbox = None
+            
             def configure_scroll_region(event=None):
                 # 取消之前的定时器
                 if self._scroll_update_timer:
@@ -169,17 +175,17 @@ class Git2LogsGUI:
                     try:
                         bbox = self.scroll_canvas.bbox("all")
                         if bbox:
-                            # 只在边界框确实改变时才更新
-                            current_region = self.scroll_canvas.cget("scrollregion")
-                            new_region = f"{bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]}"
-                            if current_region != new_region:
+                            # 只在边界框确实改变时才更新（减少不必要的更新）
+                            bbox_str = f"{bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]}"
+                            if self._last_bbox != bbox_str:
                                 self.scroll_canvas.configure(scrollregion=bbox)
+                                self._last_bbox = bbox_str
                     except:
                         pass
                     self._scroll_update_timer = None
                 
-                # 使用较短的延迟，但确保不会累积
-                self._scroll_update_timer = self.root.after(16, do_update)  # ~60fps
+                # 使用更长的延迟以减少更新频率（从16ms改为50ms）
+                self._scroll_update_timer = self.root.after(50, do_update)
             
             def configure_canvas_width(event):
                 # 确保内容宽度匹配画布宽度
@@ -187,20 +193,27 @@ class Git2LogsGUI:
                 self.scroll_canvas.itemconfig(canvas_window, width=canvas_width)
                 configure_scroll_region()
             
-            # 绑定事件（使用防抖机制）
-            self.content_container.bind('<Configure>', lambda e: configure_scroll_region())
+            # 绑定事件（使用防抖机制，减少触发频率）
+            self._configure_bind_id = None
+            def on_content_configure(event=None):
+                # 取消之前的绑定
+                if self._configure_bind_id:
+                    self.root.after_cancel(self._configure_bind_id)
+                # 延迟绑定，避免频繁触发
+                self._configure_bind_id = self.root.after(100, configure_scroll_region)
             
+            self.content_container.bind('<Configure>', on_content_configure)
             self.scroll_canvas.bind('<Configure>', configure_canvas_width)
             
-            # 绑定鼠标滚轮（优化性能）
+            # 绑定鼠标滚轮（优化性能，使用更平滑的滚动）
             def on_mousewheel(event):
                 # 检查是否在滚动区域内
                 if self.scroll_canvas.winfo_containing(event.x_root, event.y_root):
                     # macOS 使用 delta，Windows/Linux 使用 delta/120
                     if sys.platform == 'darwin':
-                        delta = int(-1 * event.delta)
+                        delta = int(-1 * event.delta * 0.5)  # 减小滚动幅度，更平滑
                     else:
-                        delta = int(-1 * (event.delta / 120))
+                        delta = int(-1 * (event.delta / 120) * 0.5)
                     self.scroll_canvas.yview_scroll(delta, "units")
                     return "break"
             
@@ -210,9 +223,9 @@ class Git2LogsGUI:
                 self.scroll_canvas.bind_all("<Button-4>", lambda e: self.scroll_canvas.yview_scroll(-1, "units"))
                 self.scroll_canvas.bind_all("<Button-5>", lambda e: self.scroll_canvas.yview_scroll(1, "units"))
             
-            # 布局 Canvas 和 Scrollbar
+            # 布局 Canvas（滚动条隐藏，不显示）
             self.scroll_canvas.pack(side="left", fill="both", expand=True)
-            scrollbar.pack(side="right", fill="y")
+            # scrollbar.pack(side="right", fill="y")  # 注释掉，不显示滚动条
             self.scroll_canvas.configure(yscrollcommand=scrollbar.set)
             
             # 优化：禁用画布自动更新以提高性能
@@ -223,8 +236,8 @@ class Git2LogsGUI:
             self._create_tab2_date_output()
             self._create_tab3_ai_analysis()
             
-            # 创建底部操作区域（固定在底部，不滚动）
-            self._create_bottom_actions(main_container)
+            # 创建底部操作按钮区域（添加到可滚动容器中）
+            self._create_bottom_actions()
             
             # 默认显示第一个标签页
             self._switch_tab("GitLab配置")
@@ -242,6 +255,54 @@ class Git2LogsGUI:
             except:
                 pass
             raise
+    
+    def _create_log_area(self, parent):
+        """创建日志显示区域（放在最上方）"""
+        # 日志输出区域
+        log_container = ctk.CTkFrame(parent, fg_color=self.bg_main, corner_radius=0)
+        log_container.pack(fill="x", padx=0, pady=(0, 10))
+        
+        log_title_frame = ctk.CTkFrame(log_container,
+                                     fg_color=self.bg_main,
+                                     height=40,
+                                     corner_radius=0)
+        log_title_frame.pack(fill="x", padx=20, pady=(0, 8))
+        log_title_frame.pack_propagate(False)
+        
+        log_title = ctk.CTkLabel(log_title_frame,
+                              text="执行日志",
+                              font=ctk.CTkFont(size=13, weight="bold"),
+                              text_color=self.text_primary,
+                              anchor="w")
+        log_title.pack(side="left", padx=0, pady=10)
+        
+        # 日志文本区域 - 使用等宽字体，固定高度
+        log_card = ctk.CTkFrame(log_container,
+                              fg_color=self.bg_card,
+                              corner_radius=10)
+        log_card.pack(fill="x", padx=20, pady=(0, 0))
+        
+        # 使用 ScrolledText（CustomTkinter 没有原生的 ScrolledText）
+        # 创建一个内部Frame来放置ScrolledText
+        text_container = ctk.CTkFrame(log_card, fg_color=self.bg_main, corner_radius=8)
+        text_container.pack(fill="x", padx=10, pady=10)
+        
+        from tkinter import scrolledtext
+        self.log_text = scrolledtext.ScrolledText(text_container,
+                                             height=8,  # 固定高度，减少占用空间
+                                             width=80,
+                                             font=("JetBrains Mono", 10),  # 等宽字体，稍小一点
+                                             wrap="word",
+                                             bg=self.bg_main,
+                                             fg=self.text_primary,
+                                             insertbackground=self.accent_color,
+                                             selectbackground=self.accent_color,
+                                             selectforeground="white",
+                                             borderwidth=0,
+                                             relief="flat",
+                                             padx=12,
+                                             pady=12)
+        self.log_text.pack(fill="both", expand=False)
     
     def _create_tab1_gitlab_config(self):
         """创建标签页1: GitLab配置"""
@@ -774,8 +835,8 @@ class Git2LogsGUI:
         self.tab_frames["AI分析"] = tab3
         tab3.pack_forget()
     
-    def _create_bottom_actions(self, parent):
-        """创建底部操作区域（添加到可滚动容器中）"""
+    def _create_bottom_actions(self):
+        """创建底部操作按钮区域（添加到可滚动容器中）"""
         # 执行按钮区域
         button_container = ctk.CTkFrame(self.content_container,
                                        fg_color=self.bg_main,
@@ -830,52 +891,6 @@ class Git2LogsGUI:
                                            state="normal",
                                            command=self._manual_ai_analysis)
         self.ai_analysis_btn.pack(side="left", padx=8)
-        
-        # 日志输出区域（添加到可滚动容器中）
-        log_container = ctk.CTkFrame(self.content_container, fg_color=self.bg_main, corner_radius=0)
-        log_container.pack(fill="both", expand=True, padx=0, pady=(0, 20))
-        
-        log_title_frame = ctk.CTkFrame(log_container,
-                                     fg_color=self.bg_main,
-                                     height=50,
-                                     corner_radius=0)
-        log_title_frame.pack(fill="x", padx=0, pady=0)
-        log_title_frame.pack_propagate(False)
-        
-        log_title = ctk.CTkLabel(log_title_frame,
-                              text="执行日志",
-                              font=ctk.CTkFont(size=14, weight="bold"),
-                              text_color=self.text_primary,
-                              anchor="w")
-        log_title.pack(side="left", padx=20, pady=15)
-        
-        # 日志文本区域 - 使用等宽字体，带内阴影效果
-        log_card = ctk.CTkFrame(log_container,
-                              fg_color=self.bg_card,
-                              corner_radius=10)
-        log_card.pack(fill="both", expand=True, padx=20, pady=(0, 20))
-        
-        # 使用 ScrolledText（CustomTkinter 没有原生的 ScrolledText）
-        # 创建一个内部Frame来放置ScrolledText
-        text_container = ctk.CTkFrame(log_card, fg_color=self.bg_main, corner_radius=8)
-        text_container.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        from tkinter import scrolledtext
-        self.log_text = scrolledtext.ScrolledText(text_container,
-                                             height=15,
-                                             width=80,
-                                             font=("JetBrains Mono", 11),  # 等宽字体
-                                             wrap="word",
-                                             bg=self.bg_main,
-                                             fg=self.text_primary,
-                                             insertbackground=self.accent_color,
-                                             selectbackground=self.accent_color,
-                                             selectforeground="white",
-                                             borderwidth=0,
-                                             relief="flat",
-                                             padx=15,
-                                             pady=15)
-        self.log_text.pack(fill="both", expand=True)
     
     def _switch_tab(self, tab_name):
         """切换标签页（Segmented Control 风格）"""
@@ -906,15 +921,29 @@ class Git2LogsGUI:
             def delayed_update():
                 try:
                     if hasattr(self, 'scroll_canvas'):
-                        bbox = self.scroll_canvas.bbox("all")
-                        if bbox:
-                            self.scroll_canvas.configure(scrollregion=bbox)
+                        # 先滚动到顶部
+                        self.scroll_canvas.yview_moveto(0)
+                        # 然后更新滚动区域
+                        self.root.after(100, lambda: self._update_scroll_region())
                 except:
                     pass
             
-            self.root.after(50, delayed_update)  # 延迟 50ms 更新
+            self.root.after(100, delayed_update)  # 延迟 100ms 更新，更平滑
         except Exception as e:
             print(f"切换标签页错误: {e}")
+    
+    def _update_scroll_region(self):
+        """更新滚动区域（独立方法，避免重复代码）"""
+        try:
+            if hasattr(self, 'scroll_canvas'):
+                bbox = self.scroll_canvas.bbox("all")
+                if bbox:
+                    bbox_str = f"{bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]}"
+                    if not hasattr(self, '_last_bbox') or self._last_bbox != bbox_str:
+                        self.scroll_canvas.configure(scrollregion=bbox)
+                        self._last_bbox = bbox_str
+        except Exception as e:
+            pass
     
     def _update_ai_models(self, *args):
         """更新AI模型列表"""
@@ -988,40 +1017,30 @@ class Git2LogsGUI:
     def on_output_format_changed(self, *args):
         """输出格式变化时的回调"""
         try:
+            # 统一显示为"输出目录"，因为无论什么格式都选择文件夹
+            self.output_label.configure(text="输出目录")
             format_value = self.output_format.get()
             if format_value == "all":
-                self.output_label.configure(text="输出目录")
-                self.output_hint.configure(text="提示: 批量生成时请选择目录，所有文件将保存到该目录")
+                self.output_hint.configure(text="提示: 批量生成时，所有文件将保存到选择的目录")
             else:
-                self.output_label.configure(text="输出文件")
-                self.output_hint.configure(text="提示: 批量生成时请选择目录")
+                self.output_hint.configure(text="提示: 生成的文件将保存到选择的目录")
             self.root.update_idletasks()
         except Exception:
             pass
     
     def browse_output_file(self):
-        """浏览输出文件/目录"""
+        """浏览输出目录（统一选择文件夹来存放生成的文件）"""
         try:
-            format_value = self.output_format.get()
-            if format_value == "all":
-                directory = filedialog.askdirectory(
-                    title="选择输出目录",
-                    initialdir=self.output_file.get().strip() or os.getcwd()
-                )
-                if directory:
-                    self.output_file.set(directory)
-            else:
-                filename = filedialog.asksaveasfilename(
-                    title="选择输出文件",
-                    initialdir=self.output_file.get().strip() or os.getcwd(),
-                    defaultextension=".md",
-                    filetypes=[("Markdown文件", "*.md"), ("所有文件", "*.*")]
-                )
-                if filename:
-                    self.output_file.set(filename)
+            # 无论什么格式，都选择文件夹来存放生成的文件
+            directory = filedialog.askdirectory(
+                title="选择输出目录（生成的文件将保存到此文件夹）",
+                initialdir=self.output_file.get().strip() or os.getcwd()
+            )
+            if directory:
+                self.output_file.set(directory)
             self.root.update_idletasks()
         except Exception as e:
-            messagebox.showerror("错误", f"选择文件/目录失败: {str(e)}")
+            messagebox.showerror("错误", f"选择目录失败: {str(e)}")
     
     def log(self, message, log_type="info"):
         """添加日志消息（带颜色前缀）"""
@@ -1092,8 +1111,8 @@ class Git2LogsGUI:
                 self.log_text.delete(1.0, "100.0")
                 self._log_count = 900
             
-            # 优化：减少 update_idletasks 调用频率
-            if self._log_count % 5 == 0:  # 每 5 条日志才更新一次
+            # 优化：大幅减少 update_idletasks 调用频率，避免卡顿
+            if self._log_count % 10 == 0:  # 每 10 条日志才更新一次
                 self.root.update_idletasks()
         except Exception:
             pass
@@ -1163,7 +1182,16 @@ class Git2LogsGUI:
             token = self.token.get().strip()
             author = self.author.get().strip()
             repo = self.repo.get().strip()
-            branch = self.branch.get().strip() if self.branch.get().strip() else None
+            branch_str = self.branch.get().strip()
+            # 如果不输入分支，默认为 None（查询所有分支）
+            branch = branch_str if branch_str else None
+            
+            # 调试信息：显示使用的参数
+            self.log(f"配置参数:", "info")
+            self.log(f"  GitLab URL: {gitlab_url}", "info")
+            self.log(f"  提交者: {author}", "info")
+            self.log(f"  仓库: {repo if repo else '(扫描所有项目)'}", "info")
+            self.log(f"  分支: {branch if branch else '(所有分支)'}", "info")
             
             # 检查占位符
             placeholder_text = "https://gitlab.com 或 http://gitlab.yourcompany.com"
@@ -1180,24 +1208,71 @@ class Git2LogsGUI:
             # 日期处理
             since_date = None
             until_date = None
-            if not self.use_today.get():
-                since_date = self.since_date.get().strip()
-                until_date = self.until_date.get().strip()
-                if not since_date or not until_date:
-                    self.log("错误: 请填写起始日期和结束日期", "error")
-                    self.root.after(0, lambda: messagebox.showerror("错误", "请填写起始日期和结束日期"))
-                    self.root.after(0, lambda: self.generate_btn.configure(state="normal"))
-                    return
+            if self.use_today.get():
+                # 使用今天的日期（考虑时区问题）
+                # GitLab API 使用 UTC 时间，为了覆盖时区差异，我们扩展日期范围（前后各1天）
+                from datetime import datetime, timedelta
+                today_local = datetime.now()
+                # 扩展日期范围：前一天到后一天，以覆盖时区差异
+                since_date_obj = today_local - timedelta(days=1)
+                until_date_obj = today_local + timedelta(days=1)
+                since_date = since_date_obj.strftime('%Y-%m-%d')
+                until_date = until_date_obj.strftime('%Y-%m-%d')
+                self.log(f"使用今天的日期范围: {since_date} 至 {until_date} (已扩展以覆盖时区差异)", "info")
+                # 同时记录 UTC 日期以便调试
+                from datetime import timezone
+                today_utc = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+                today_local_str = today_local.strftime('%Y-%m-%d')
+                if today_local_str != today_utc:
+                    self.log(f"提示: 本地日期为 {today_local_str}，UTC 日期为 {today_utc}，已扩展日期范围以覆盖时区差异", "info")
+            else:
+                since_date_str = self.since_date.get().strip()
+                until_date_str = self.until_date.get().strip()
+                # 如果只填写了一个日期，自动扩展日期范围
+                if since_date_str and not until_date_str:
+                    until_date_str = since_date_str
+                if until_date_str and not since_date_str:
+                    since_date_str = until_date_str
+                # 允许日期为空（不指定日期范围，查询所有提交）
+                if since_date_str:
+                    since_date = since_date_str
+                if until_date_str:
+                    until_date = until_date_str
+                if not since_date and not until_date:
+                    self.log("提示: 未指定日期范围，将查询所有提交记录", "info")
+                elif since_date and until_date and since_date == until_date:
+                    # 如果只指定了一天，也扩展日期范围
+                    from datetime import datetime, timedelta
+                    try:
+                        date_obj = datetime.strptime(since_date, '%Y-%m-%d')
+                        since_date_obj = date_obj - timedelta(days=1)
+                        until_date_obj = date_obj + timedelta(days=1)
+                        since_date = since_date_obj.strftime('%Y-%m-%d')
+                        until_date = until_date_obj.strftime('%Y-%m-%d')
+                        self.log(f"日期范围已扩展: {since_date} 至 {until_date} (覆盖时区差异)", "info")
+                    except Exception:
+                        pass
             
             # 创建GitLab客户端
             self.log(f"正在连接到 GitLab: {gitlab_url}", "info")
+            if since_date and until_date:
+                self.log(f"查询日期范围: {since_date} 至 {until_date}", "info")
             gl = create_gitlab_client(gitlab_url, token)
             
             # 获取提交记录
             all_results = {}
             
+            # 如果不输入仓库地址，默认查询所有项目
             if self.scan_all.get() or not repo:
                 self.log("正在扫描所有项目...", "info")
+                self.log(f"提交者: {author}", "info")
+                if branch:
+                    self.log(f"分支: {branch}", "info")
+                else:
+                    self.log(f"分支: (所有分支)", "info")
+                if since_date and until_date:
+                    self.log(f"日期范围: {since_date} 至 {until_date} (GitLab API 将使用 UTC 时间)", "info")
+                
                 all_results = scan_all_projects(
                     gl, author,
                     since_date=since_date,
@@ -1205,7 +1280,27 @@ class Git2LogsGUI:
                     branch=branch
                 )
                 self.log(f"扫描完成，共在 {len(all_results)} 个项目中找到提交记录", "success")
+                
+                # 如果没有找到提交，提供排查建议
+                if len(all_results) == 0:
+                    self.log("", "warning")
+                    self.log("未找到提交记录的可能原因：", "warning")
+                    self.log("1. 日期范围问题：GitLab API 使用 UTC 时间，可能与本地时区不同", "warning")
+                    self.log("   当前查询日期: " + (f"{since_date} 至 {until_date}" if since_date and until_date else "未指定（查询所有）"), "warning")
+                    self.log("2. 提交者名称不匹配：请确认提交者名称或邮箱与 GitLab 中的完全一致", "warning")
+                    self.log("   当前提交者: " + author, "warning")
+                    self.log("   提示: 请查看上面的'调试：查询到的提交示例'，确认实际作者格式", "warning")
+                    self.log("3. 分支问题：如果指定了分支，请确认该分支存在且有提交", "warning")
+                    self.log("4. 权限问题：请确认访问令牌有足够的权限", "warning")
+                    self.log("", "warning")
+                    self.log("排查建议：", "info")
+                    self.log("- 查看上面的调试信息，确认 GitLab 中实际提交的作者格式", "info")
+                    self.log("- 尝试只使用邮箱（如: mizukixja@gmail.com）或只使用名称（如: MIZUKI）", "info")
+                    self.log("- 如果指定了日期，尝试不指定日期范围（取消'今天'勾选，不填日期）", "info")
+                    self.log("- 尝试指定具体分支名称", "info")
+                    self.log("- 检查该日期范围内是否确实有提交（可以在 GitLab 网页上查看）", "info")
             else:
+                # 单项目模式
                 extracted_url = extract_gitlab_url(repo)
                 if extracted_url:
                     gitlab_url = extracted_url
@@ -1214,6 +1309,10 @@ class Git2LogsGUI:
                 
                 project_identifier = parse_project_identifier(repo)
                 self.log(f"正在获取项目: {project_identifier}", "info")
+                if branch:
+                    self.log(f"分支: {branch}", "info")
+                else:
+                    self.log(f"分支: (所有分支)", "info")
                 
                 try:
                     project = gl.projects.get(project_identifier)
