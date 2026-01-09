@@ -24,7 +24,16 @@ fi
 
 # 检查依赖
 echo "检查依赖..."
-pip3 install -r requirements.txt
+echo "安装核心依赖..."
+pip3 install python-gitlab || echo "警告: python-gitlab 安装失败，但继续打包..."
+
+echo "尝试安装AI依赖（可选，如果失败不影响打包）..."
+pip3 install openai || echo "提示: openai 未安装，AI功能将不可用"
+pip3 install anthropic || echo "提示: anthropic 未安装，AI功能将不可用"
+pip3 install google-generativeai || echo "提示: google-generativeai 未安装，AI功能将不可用"
+
+echo "安装 CustomTkinter（现代化UI）..."
+pip3 install customtkinter || echo "警告: customtkinter 安装失败，将使用标准 tkinter 界面"
 
 # 清理之前的构建
 echo "清理之前的构建..."
@@ -47,7 +56,9 @@ $PYINSTALLER_CMD --name="GitLab提交日志生成工具" \
     --windowed \
     --onefile \
     --add-data "git2logs.py:." \
+    --add-data "ai_analysis.py:." \
     --add-data "generate_report_image.py:." \
+    --add-data "git2logs_gui_ctk.py:." \
     --hidden-import=tkinter \
     --hidden-import=gitlab \
     --hidden-import=tkinter.ttk \
@@ -55,6 +66,14 @@ $PYINSTALLER_CMD --name="GitLab提交日志生成工具" \
     --hidden-import=tkinter.messagebox \
     --hidden-import=tkinter.filedialog \
     --hidden-import=statistics \
+    --hidden-import=openai \
+    --hidden-import=anthropic \
+    --hidden-import=google.generativeai \
+    --hidden-import=ai_analysis \
+    --hidden-import=customtkinter \
+    --hidden-import=PIL \
+    --hidden-import=PIL.Image \
+    --hidden-import=PIL.ImageTk \
     $ICON_PARAM \
     git2logs_gui.py
 

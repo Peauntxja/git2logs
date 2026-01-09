@@ -1,16 +1,35 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-GitLab 提交日志生成工具 - 图形界面版本
+GitLab 提交日志生成工具 - 图形界面版本（CustomTkinter 现代化版本）
 """
-import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox, filedialog
-import threading
-import subprocess
 import sys
 import os
+
+# 尝试导入 CustomTkinter，如果失败则使用标准 tkinter
+try:
+    import customtkinter as ctk
+    CTK_AVAILABLE = True
+except ImportError:
+    import tkinter as tk
+    from tkinter import ttk, scrolledtext, messagebox, filedialog
+    CTK_AVAILABLE = False
+    print("警告: CustomTkinter 未安装，使用标准 tkinter。请运行: pip install customtkinter")
+
+import threading
+import subprocess
 from pathlib import Path
 from datetime import datetime
+
+# 如果 CustomTkinter 可用，使用它；否则使用标准 tkinter
+if CTK_AVAILABLE:
+    from tkinter import messagebox, filedialog
+    from tkinter import scrolledtext
+    tk = ctk  # 为了兼容性
+    ttk = ctk  # CustomTkinter 有自己的组件
+else:
+    import tkinter as tk
+    from tkinter import ttk, scrolledtext, messagebox, filedialog
 
 # 获取资源路径（支持打包后的环境）
 def resource_path(relative_path):
@@ -43,178 +62,754 @@ def get_script_path(script_name):
 
 class Git2LogsGUI:
     def __init__(self, root):
-        self.root = root
-        self.root.title("GitLab 提交日志生成工具")
-        self.root.geometry("800x700")
+        try:
+            self.root = root
+            self.root.title("GitLab 提交日志生成工具")
+            # 增大窗口尺寸，使用更好的默认大小
+            self.root.geometry("900x750")
+            self.root.minsize(800, 600)
+            
+            # 保存待处理的AI分析数据
+            self._pending_ai_data = None
+            
+            # 优化界面响应性能
+            self.root.option_add('*tearOff', False)  # 禁用菜单的 tearoff 功能
+            self._log_count = 0  # 日志计数器，用于控制更新频率
+            
+            # 配置现代化样式 - 暗黑主题，参考GitHub Dark模式
+            style = ttk.Style()
+            try:
+                style.theme_use('clam')
+            except:
+                pass
+            
+            # 暗黑主题配色方案 - GitHub Dark风格
+            try:
+                # 主色调 - GitHub绿色
+                primary_color = '#238636'  # GitHub绿色
+                primary_hover = '#2ea043'
+                primary_dark = '#1a7f37'
+                
+                # 暗黑背景色
+                bg_main = '#0D1117'         # GitHub深色背景
+                bg_card = '#161B22'         # 卡片深色背景
+                bg_secondary = '#21262D'    # 次要背景
+                
+                # 文字颜色（暗黑主题）
+                text_primary = '#C9D1D9'    # 主要文字（浅色）
+                text_secondary = '#8B949E'  # 次要文字
+                text_hint = '#6E7681'       # 提示文字
+                
+                # 边框和分割线（暗黑主题）
+                border_color = '#30363D'     # 深色边框
+                border_light = '#21262D'    # 浅边框
+                
+                # 输入框背景
+                entry_bg = '#0D1117'        # 输入框深色背景
+                
+                # 设置窗口背景为暗黑
+                root.configure(bg=bg_main)
+                
+                # 配置标签样式（暗黑主题）
+                style.configure('TLabel',
+                               font=('Helvetica Neue', 11),
+                               background=bg_card,
+                               foreground=text_primary,
+                               padding=(0, 2))
+                
+                # 配置输入框样式 - 暗黑主题，使用更暗的边框
+                style.configure('TEntry',
+                               font=('Helvetica Neue', 13),
+                               fieldbackground=entry_bg,
+                               foreground=text_primary,
+                               borderwidth=1,
+                               relief='solid',
+                               padding=(10, 8),
+                               bordercolor='#30363D')  # 使用更暗的边框色
+                style.map('TEntry',
+                         bordercolor=[('focus', primary_color),
+                                    ('!focus', '#30363D')],  # 非聚焦时使用暗色边框
+                         lightcolor=[('focus', primary_color),
+                                   ('!focus', '#30363D')],
+                         darkcolor=[('focus', primary_color),
+                                  ('!focus', '#30363D')],
+                         fieldbackground=[('focus', entry_bg),
+                                        ('!focus', entry_bg)])
+                
+                # 配置按钮样式 - 暗黑主题
+                style.configure('TButton',
+                               font=('Helvetica Neue', 12),
+                               background=primary_color,
+                               foreground='white',
+                               borderwidth=0,
+                               relief='flat',
+                               padding=(16, 10),
+                               focuscolor='none')
+                style.map('TButton',
+                         background=[('active', primary_hover),
+                                   ('pressed', primary_dark)])
+                
+                # 次要按钮（暗黑主题）
+                style.configure('Secondary.TButton',
+                               background=bg_secondary,
+                               foreground=text_primary,
+                               borderwidth=1,
+                               bordercolor=border_color,
+                               padding=(16, 10))
+                style.map('Secondary.TButton',
+                         background=[('active', '#30363D')],
+                         bordercolor=[('active', border_color)])
+                
+                # 配置复选框和单选按钮（暗黑主题）
+                style.configure('TCheckbutton',
+                               font=('Helvetica Neue', 11),
+                               background=bg_card,
+                               foreground=text_primary,
+                               padding=(0, 4))
+                
+                style.configure('TRadiobutton',
+                               font=('Helvetica Neue', 11),
+                               background=bg_card,
+                               foreground=text_primary,
+                               padding=(0, 4))
+                
+                # 配置下拉框（暗黑主题）
+                style.configure('TCombobox',
+                               font=('Helvetica Neue', 13),
+                               fieldbackground=entry_bg,
+                               foreground=text_primary,
+                               borderwidth=1,
+                               relief='solid',
+                               padding=(10, 8),
+                               bordercolor='#30363D')  # 使用更暗的边框色
+                style.map('TCombobox',
+                         bordercolor=[('focus', primary_color),
+                                    ('!focus', '#30363D')],
+                         fieldbackground=[('focus', entry_bg),
+                                        ('!focus', entry_bg)])
+                
+                # 配置标签页 - 自定义实现以修复对齐问题
+                style.configure('TNotebook',
+                               background=bg_main,
+                               borderwidth=0)
+                # 关键修复：统一所有标签页的高度和位置
+                style.configure('TNotebook.Tab',
+                               font=('Helvetica Neue', 12),
+                               background=bg_secondary,
+                               foreground=text_secondary,
+                               padding=(24, 14),
+                               borderwidth=0)
+                style.map('TNotebook.Tab',
+                         background=[('selected', bg_card)],
+                         foreground=[('selected', text_primary)],
+                         # 关键：禁用expand，保持统一高度
+                         expand=[('', [0, 0, 0, 0]),
+                               ('selected', [0, 0, 0, 0])])
+                
+                # 配置框架（暗黑主题）
+                style.configure('TFrame',
+                               background=bg_card,
+                               relief='flat')
+                
+                # 配置LabelFrame（暗黑主题）
+                style.configure('TLabelframe',
+                               background=bg_card,
+                               foreground=text_primary,
+                               borderwidth=0,
+                               relief='flat')
+                style.configure('TLabelframe.Label',
+                               font=('Helvetica Neue', 13, 'bold'),
+                               background=bg_card,
+                               foreground=text_primary)
+                
+            except Exception as e:
+                print(f"样式配置警告: {e}")
+                pass
+            
+            # 创建主容器 - 暗黑主题
+            main_container = tk.Frame(root, bg='#0D1117')
+            main_container.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
+            
+            # 配置网格权重
+            root.columnconfigure(0, weight=1)
+            root.rowconfigure(0, weight=1)
+            
+            # 创建标题区域 - 暗黑主题
+            title_frame = tk.Frame(main_container, bg='#0D1117', height=70)
+            title_frame.pack(fill=tk.X, pady=(0, 0))
+            title_frame.pack_propagate(False)
+            
+            title_label = tk.Label(title_frame, 
+                                text="GitLab 提交日志生成工具", 
+                                font=("Helvetica Neue", 20, "bold"),
+                                bg='#0D1117',
+                                fg='#C9D1D9')
+            title_label.pack(pady=(18, 4))
+            
+            subtitle_label = tk.Label(title_frame,
+                                     text="轻松生成和管理您的代码提交报告",
+                                     font=("Helvetica Neue", 12),
+                                     bg='#0D1117',
+                                     fg='#8B949E')
+            subtitle_label.pack()
+            
+            # 创建自定义标签页容器 - 修复对齐问题
+            # 使用Frame + Button实现自定义标签页，确保完全对齐
+            tab_container = tk.Frame(main_container, bg='#0D1117', height=50)
+            tab_container.pack(fill=tk.X, padx=0, pady=(0, 0))
+            tab_container.pack_propagate(False)
+            
+            # 创建标签按钮容器
+            tab_button_frame = tk.Frame(tab_container, bg='#0D1117')
+            tab_button_frame.pack(side=tk.LEFT, padx=20, pady=12)  # 增加垂直padding使标签更居中
+            
+            # 存储标签页引用
+            self.tabs = {}
+            self.current_tab = None
+            
+            # 创建标签按钮 - 使用更柔和的颜色
+            tab_names = ["GitLab配置", "日期和输出", "AI分析"]
+            self.tab_buttons = []
+            for i, name in enumerate(tab_names):
+                btn = tk.Button(tab_button_frame, text=name,
+                              font=("Helvetica Neue", 12),
+                              bg='#21262D', fg='#6E7681',  # 使用更暗的灰色文字
+                              activebackground='#161B22',
+                              activeforeground='#8B949E',  # 悬停时使用稍亮的灰色
+                              borderwidth=0,
+                              relief='flat',
+                              padx=24, pady=14,
+                              cursor='hand2',
+                              command=lambda n=name: self._switch_tab(n))
+                btn.pack(side=tk.LEFT, padx=(0, 2))
+                self.tab_buttons.append((name, btn))
+            
+            # 创建可滚动的内容容器
+            # 使用Canvas + Scrollbar实现滚动
+            canvas_frame = tk.Frame(main_container, bg='#0D1117')
+            canvas_frame.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
+            
+            # 创建Canvas和Scrollbar
+            self.scroll_canvas = tk.Canvas(canvas_frame, bg='#0D1117', highlightthickness=0)
+            scrollbar = ttk.Scrollbar(canvas_frame, orient="vertical", command=self.scroll_canvas.yview)
+            self.content_container = tk.Frame(self.scroll_canvas, bg='#0D1117')
+            
+            # 将内容容器添加到Canvas
+            canvas_window = self.scroll_canvas.create_window((0, 0), window=self.content_container, anchor="nw")
+            
+            # 配置滚动
+            def configure_scroll_region(event):
+                self.scroll_canvas.configure(scrollregion=self.scroll_canvas.bbox("all"))
+            
+            def configure_canvas_width(event):
+                canvas_width = event.width
+                self.scroll_canvas.itemconfig(canvas_window, width=canvas_width)
+            
+            self.content_container.bind('<Configure>', configure_scroll_region)
+            self.scroll_canvas.bind('<Configure>', configure_canvas_width)
+            
+            # 绑定鼠标滚轮（macOS和Windows/Linux不同）
+            def on_mousewheel(event):
+                # macOS使用delta，Windows/Linux使用delta/120
+                if sys.platform == 'darwin':
+                    self.scroll_canvas.yview_scroll(int(-1 * (event.delta)), "units")
+                else:
+                    self.scroll_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            
+            # 绑定滚轮事件
+            if sys.platform == 'darwin':
+                self.scroll_canvas.bind_all("<MouseWheel>", on_mousewheel)
+            else:
+                self.scroll_canvas.bind_all("<MouseWheel>", on_mousewheel)
+                self.scroll_canvas.bind_all("<Button-4>", lambda e: self.scroll_canvas.yview_scroll(-1, "units"))
+                self.scroll_canvas.bind_all("<Button-5>", lambda e: self.scroll_canvas.yview_scroll(1, "units"))
+            
+            # 布局Canvas和Scrollbar
+            self.scroll_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            self.scroll_canvas.configure(yscrollcommand=scrollbar.set)
+            
+            # 创建所有标签页内容（初始隐藏）
+            self.tab_frames = {}
+            
+            # ========== 标签页1: GitLab配置 ==========
+            tab1 = tk.Frame(self.content_container, bg='#161B22', padx=40, pady=35)
+            self.tab_frames["GitLab配置"] = tab1
+            
+            # 创建内容容器 - 暗黑主题
+            content_frame = tk.Frame(tab1, bg='#161B22')
+            content_frame.pack(fill=tk.BOTH, expand=True)
+            content_frame.columnconfigure(1, weight=1, minsize=450)
+            
+            row = 0
+            
+            # GitLab URL - 暗黑主题输入组
+            url_label = tk.Label(content_frame, text="GitLab URL", 
+                               font=("Helvetica Neue", 13, "bold"),
+                               bg='#161B22', fg='#C9D1D9',
+                               anchor='w')
+            url_label.grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=(0, 6))
+            row += 1
+            
+            self.gitlab_url = tk.StringVar()
+            gitlab_entry = ttk.Entry(content_frame, textvariable=self.gitlab_url, width=50)
+            gitlab_entry.grid(row=row, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 24))
+            # 添加提示文本（使用灰色占位符效果）
+            placeholder_text = "https://gitlab.com 或 http://gitlab.yourcompany.com"
+            self.gitlab_url.set(placeholder_text)
+            gitlab_entry.config(foreground="gray")
+            def on_gitlab_focus_in(event):
+                current_value = self.gitlab_url.get()
+                if current_value == placeholder_text:
+                    self.gitlab_url.set("")
+                    gitlab_entry.config(foreground="black")
+            def on_gitlab_focus_out(event):
+                current_value = self.gitlab_url.get()
+                if not current_value.strip():
+                    self.gitlab_url.set(placeholder_text)
+                    gitlab_entry.config(foreground="gray")
+            gitlab_entry.bind('<FocusIn>', on_gitlab_focus_in)
+            gitlab_entry.bind('<FocusOut>', on_gitlab_focus_out)
+            row += 1
         
-        # 优化界面响应性能
-        self.root.option_add('*tearOff', False)  # 禁用菜单的 tearoff 功能
-        self._log_count = 0  # 日志计数器，用于控制更新频率
+            row += 1
+            
+            # 仓库地址（单项目模式）
+            repo_label = tk.Label(content_frame, text="仓库地址", 
+                                font=("Helvetica Neue", 13, "bold"),
+                                bg='#161B22', fg='#C9D1D9',
+                                anchor='w')
+            repo_label.grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=(0, 6))
+            row += 1
+            
+            self.repo = tk.StringVar()
+            repo_entry = ttk.Entry(content_frame, textvariable=self.repo, width=50)
+            repo_entry.grid(row=row, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 16))
+            row += 1
+            
+            # 扫描所有项目选项
+            self.scan_all = tk.BooleanVar()
+            scan_check = ttk.Checkbutton(content_frame, 
+                        text="自动扫描所有项目（不填仓库地址时启用）", 
+                        variable=self.scan_all)
+            scan_check.grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=(0, 24))
+            row += 1
+            
+            # 分支
+            branch_label = tk.Label(content_frame, text="分支", 
+                                  font=("Helvetica Neue", 13, "bold"),
+                                  bg='#161B22', fg='#C9D1D9',
+                                  anchor='w')
+            branch_label.grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=(0, 6))
+            row += 1
+            
+            self.branch = tk.StringVar()
+            ttk.Entry(content_frame, textvariable=self.branch, width=50).grid(
+                row=row, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 24))
+            row += 1
+            
+            # 提交者
+            author_label = tk.Label(content_frame, text="提交者", 
+                                  font=("Helvetica Neue", 13, "bold"),
+                                  bg='#161B22', fg='#C9D1D9',
+                                  anchor='w')
+            author_label.grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=(0, 6))
+            row += 1
+            
+            self.author = tk.StringVar(value="MIZUKI")
+            ttk.Entry(content_frame, textvariable=self.author, width=50).grid(
+                row=row, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 24))
+            row += 1
+            
+            # 访问令牌
+            token_label = tk.Label(content_frame, text="访问令牌", 
+                                 font=("Helvetica Neue", 13, "bold"),
+                                 bg='#161B22', fg='#C9D1D9',
+                                 anchor='w')
+            token_label.grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=(0, 6))
+            row += 1
+            
+            self.token = tk.StringVar()
+            token_frame = tk.Frame(content_frame, bg='#161B22')
+            token_frame.grid(row=row, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 24))
+            token_frame.columnconfigure(0, weight=1)
+            token_entry = ttk.Entry(token_frame, textvariable=self.token, width=50, show="*")
+            token_entry.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=(0, 8))
+            show_btn = ttk.Button(token_frame, text="显示", width=10,
+                  command=lambda: self.toggle_token_visibility(token_entry))
+            show_btn.grid(row=0, column=1)
+            row += 1
+            
+            # 添加提示信息 - 暗黑主题
+            hint_frame = tk.Frame(content_frame, bg='#21262D', relief='flat', 
+                                borderwidth=1, highlightbackground='#30363D',
+                                padx=16, pady=14)
+            hint_frame.grid(row=row, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(8, 0))
+            hint_title = tk.Label(hint_frame, text="使用提示", 
+                                font=("Helvetica Neue", 12, "bold"),
+                                bg='#21262D', fg='#C9D1D9',
+                                anchor='w')
+            hint_title.pack(anchor='w', pady=(0, 8))
+            hint_text = "• GitLab URL 是您的GitLab实例地址\n• 仓库地址留空时，勾选'自动扫描所有项目'可扫描所有项目\n• 访问令牌用于身份验证，可在GitLab设置中生成"
+            hint_label = tk.Label(hint_frame, text=hint_text,
+                                font=("Helvetica Neue", 12),
+                                bg='#21262D', fg='#8B949E',
+                                justify=tk.LEFT,
+                                anchor='w')
+            hint_label.pack(anchor='w')
+            
+            # ========== 标签页2: 日期和输出设置 ==========
+            tab2 = tk.Frame(self.content_container, bg='#161B22', padx=40, pady=35)
+            self.tab_frames["日期和输出"] = tab2
+            
+            content_frame2 = tk.Frame(tab2, bg='#161B22')
+            content_frame2.pack(fill=tk.BOTH, expand=True)
+            content_frame2.columnconfigure(0, weight=1)
+            
+            row = 0
+            
+            # 日期选择区域 - 暗黑主题
+            date_card = tk.Frame(content_frame2, bg='#21262D', relief='flat', 
+                               borderwidth=1, highlightbackground='#30363D',
+                               padx=24, pady=24)
+            date_card.grid(row=row, column=0, sticky=(tk.W, tk.E), pady=(0, 24))
+            date_card.columnconfigure(1, weight=1)
+            
+            date_title = tk.Label(date_card, text="日期范围", 
+                                font=("Helvetica Neue", 13, "bold"),
+                                bg='#21262D', fg='#C9D1D9',
+                                anchor='w')
+            date_title.grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 16))
+            
+            date_row = 1
+            self.use_today = tk.BooleanVar(value=True)
+            today_check = ttk.Checkbutton(date_card, text="今天", variable=self.use_today,
+                       command=self.toggle_date_inputs)
+            today_check.grid(row=date_row, column=0, sticky=tk.W, pady=8)
+            
+            date_input_frame = tk.Frame(date_card, bg='#21262D')
+            date_input_frame.grid(row=date_row, column=1, sticky=(tk.W, tk.E), padx=(30, 0))
+            
+            tk.Label(date_input_frame, text="起始日期", 
+                    font=("Helvetica Neue", 12),
+                    bg='#21262D', fg='#8B949E').grid(row=0, column=0, padx=(0, 8), sticky=tk.W)
+            self.since_date = tk.StringVar()
+            self.since_entry = ttk.Entry(date_input_frame, textvariable=self.since_date, width=16)
+            self.since_entry.grid(row=1, column=0, padx=(0, 24), pady=(6, 0))
+            
+            tk.Label(date_input_frame, text="结束日期", 
+                    font=("Helvetica Neue", 12),
+                    bg='#21262D', fg='#8B949E').grid(row=0, column=1, padx=(0, 8), sticky=tk.W)
+            self.until_date = tk.StringVar()
+            self.until_entry = ttk.Entry(date_input_frame, textvariable=self.until_date, width=16)
+            self.until_entry.grid(row=1, column=1, pady=(6, 0))
+            
+            # 添加日期格式提示
+            date_hint = tk.Label(date_card, 
+                               text="提示: 日期格式为 YYYY-MM-DD，例如: 2025-12-12", 
+                               font=("Helvetica Neue", 12),
+                               bg='#21262D', fg='#6E7681',
+                               anchor='w')
+            date_hint.grid(row=2, column=0, columnspan=2, pady=(16, 0), sticky=tk.W)
+            
+            self.toggle_date_inputs()
+            row += 1
+            
+            # 输出格式选择 - 暗黑主题
+            format_card = tk.Frame(content_frame2, bg='#21262D', relief='flat',
+                                 borderwidth=1, highlightbackground='#30363D',
+                                 padx=24, pady=24)
+            format_card.grid(row=row, column=0, sticky=(tk.W, tk.E), pady=(0, 24))
+            format_card.columnconfigure(0, weight=1)
+            
+            format_title = tk.Label(format_card, text="输出格式", 
+                                  font=("Helvetica Neue", 13, "bold"),
+                                  bg='#21262D', fg='#C9D1D9',
+                                  anchor='w')
+            format_title.grid(row=0, column=0, sticky=tk.W, pady=(0, 16))
+            
+            self.output_format = tk.StringVar(value="daily_report")
+            format_options = [
+                ("Markdown 提交日志", "commits"),
+                ("开发日报 (Markdown)", "daily_report"),
+                ("统计报告 (代码统计与评分)", "statistics"),
+                ("HTML 格式", "html"),
+                ("PNG 图片", "png"),
+                ("批量生成所有格式 (统计报告+日报+HTML+PNG)", "all")
+            ]
+            
+            for i, (text, value) in enumerate(format_options):
+                rb = ttk.Radiobutton(format_card, text=text, 
+                           variable=self.output_format, value=value)
+                rb.grid(row=i+1, column=0, sticky=tk.W, pady=8)
+            
+            row += 1
+            
+            # 输出文件/目录路径 - 暗黑主题
+            output_card = tk.Frame(content_frame2, bg='#21262D', relief='flat',
+                                 borderwidth=1, highlightbackground='#30363D',
+                                 padx=24, pady=24)
+            output_card.grid(row=row, column=0, sticky=(tk.W, tk.E), pady=(0, 0))
+            output_card.columnconfigure(0, weight=1)
+            
+            output_title = tk.Label(output_card, text="输出设置", 
+                                  font=("Helvetica Neue", 13, "bold"),
+                                  bg='#21262D', fg='#C9D1D9',
+                                  anchor='w')
+            output_title.grid(row=0, column=0, sticky=tk.W, pady=(0, 16))
+            
+            output_label_text = "输出目录" if self.output_format.get() == "all" else "输出文件"
+            self.output_label = tk.Label(output_card, text=output_label_text,
+                                        font=("Helvetica Neue", 13, "bold"),
+                                        bg='#21262D', fg='#C9D1D9',
+                                        anchor='w')
+            self.output_label.grid(row=1, column=0, sticky=tk.W, pady=(0, 6))
+            
+            self.output_file = tk.StringVar()
+            output_frame = tk.Frame(output_card, bg='#21262D')
+            output_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(0, 8))
+            output_frame.columnconfigure(0, weight=1)
+            output_entry = ttk.Entry(output_frame, textvariable=self.output_file, width=40)
+            output_entry.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=(0, 8))
+            browse_btn = ttk.Button(output_frame, text="浏览", width=12,
+                  command=self.browse_output_file)
+            browse_btn.grid(row=0, column=1)
+            
+            # 添加提示标签
+            self.output_hint = tk.Label(output_card, text="提示: 批量生成时请选择目录", 
+                                     font=("Helvetica Neue", 12),
+                                     bg='#21262D', fg='#6E7681',
+                                     anchor='w')
+            self.output_hint.grid(row=3, column=0, sticky=tk.W, pady=(0, 0))
         
-        # 创建主框架
-        main_frame = ttk.Frame(root, padding="10")
-        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+            # 绑定输出格式变化事件（延迟绑定，避免初始化时调用）
+            def setup_output_format_trace():
+                try:
+                    self.output_format.trace('w', self.on_output_format_changed)
+                except Exception:
+                    pass
+            # 在下一帧执行，确保所有初始化完成
+            root.after(100, setup_output_format_trace)
+            
+            # ========== 标签页3: AI分析配置 ==========
+            tab3 = tk.Frame(self.content_container, bg='#161B22', padx=40, pady=35)
+            self.tab_frames["AI分析"] = tab3
+            
+            content_frame3 = tk.Frame(tab3, bg='#161B22')
+            content_frame3.pack(fill=tk.BOTH, expand=True)
+            content_frame3.columnconfigure(1, weight=1)
+            
+            row = 0
+            
+            # AI分析开关
+            self.ai_enabled = tk.BooleanVar(value=False)
+            ai_enable_check = ttk.Checkbutton(content_frame3, 
+                        text="启用AI分析", 
+                        variable=self.ai_enabled,
+                        command=self.toggle_ai_config)
+            ai_enable_check.grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=(0, 24))
+            row += 1
+            
+            # AI配置区域（默认隐藏）- 暗黑主题
+            self.ai_config_frame = tk.Frame(content_frame3, bg='#21262D', relief='flat',
+                                          borderwidth=1, highlightbackground='#30363D',
+                                          padx=24, pady=24)
+            self.ai_config_frame.grid(row=row, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 0))
+            self.ai_config_frame.columnconfigure(1, weight=1)
+            
+            ai_title = tk.Label(self.ai_config_frame, text="AI配置", 
+                              font=("Helvetica Neue", 13, "bold"),
+                              bg='#21262D', fg='#C9D1D9',
+                              anchor='w')
+            ai_title.grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 20))
         
-        # 配置网格权重
-        root.columnconfigure(0, weight=1)
-        root.rowconfigure(0, weight=1)
-        main_frame.columnconfigure(1, weight=1)
+            config_row = 0
         
-        row = 0
+            # AI服务选择
+            ttk.Label(self.ai_config_frame, text="AI服务:").grid(
+                row=config_row, column=0, sticky=tk.W, pady=8, padx=(0, 10))
+            self.ai_service = tk.StringVar(value="openai")
+            ai_service_combo = ttk.Combobox(self.ai_config_frame, textvariable=self.ai_service, 
+                                       values=["openai", "anthropic", "gemini"], 
+                                       state="readonly", width=20)
+            ai_service_combo.grid(row=config_row, column=1, sticky=tk.W, pady=8)
+            config_row += 1
         
-        # 标题
-        title_label = ttk.Label(main_frame, text="GitLab 提交日志生成工具", 
-                               font=("Arial", 16, "bold"))
-        title_label.grid(row=row, column=0, columnspan=3, pady=(0, 20))
-        row += 1
+            # 模型选择
+            ttk.Label(self.ai_config_frame, text="模型:").grid(
+                row=config_row, column=0, sticky=tk.W, pady=8, padx=(0, 10))
+            self.ai_model = tk.StringVar(value="gpt-4")
+            ai_model_combo = ttk.Combobox(self.ai_config_frame, textvariable=self.ai_model, 
+                                     width=30)
+            ai_model_combo.grid(row=config_row, column=1, sticky=(tk.W, tk.E), pady=8, padx=(0, 5))
         
-        # GitLab URL
-        ttk.Label(main_frame, text="GitLab URL:").grid(row=row, column=0, sticky=tk.W, pady=5)
-        self.gitlab_url = tk.StringVar()
-        gitlab_entry = ttk.Entry(main_frame, textvariable=self.gitlab_url, width=50)
-        gitlab_entry.grid(row=row, column=1, columnspan=2, sticky=(tk.W, tk.E), pady=5)
-        # 添加提示文本（使用灰色占位符效果）
-        placeholder_text = "https://gitlab.com 或 http://gitlab.yourcompany.com"
-        self.gitlab_url.set(placeholder_text)
-        gitlab_entry.config(foreground="gray")
-        def on_gitlab_focus_in(event):
-            current_value = self.gitlab_url.get()
-            if current_value == placeholder_text:
-                self.gitlab_url.set("")
-                gitlab_entry.config(foreground="black")
-        def on_gitlab_focus_out(event):
-            current_value = self.gitlab_url.get()
-            if not current_value.strip():
-                self.gitlab_url.set(placeholder_text)
-                gitlab_entry.config(foreground="gray")
-        gitlab_entry.bind('<FocusIn>', on_gitlab_focus_in)
-        gitlab_entry.bind('<FocusOut>', on_gitlab_focus_out)
-        row += 1
+            # 根据服务更新模型选项
+            def update_models(*args):
+                service = self.ai_service.get()
+                if service == "openai":
+                    ai_model_combo['values'] = ["gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"]
+                    if self.ai_model.get() not in ai_model_combo['values']:
+                        self.ai_model.set("gpt-4")
+                elif service == "anthropic":
+                    ai_model_combo['values'] = ["claude-3-5-sonnet-20241022", "claude-3-opus-20240229", "claude-3-sonnet-20240229"]
+                    if self.ai_model.get() not in ai_model_combo['values']:
+                        self.ai_model.set("claude-3-5-sonnet-20241022")
+                elif service == "gemini":
+                    ai_model_combo['values'] = [
+                        "gemini-2.5-pro",
+                        "gemini-2.5-flash",
+                        "gemini-2.5-flash-lite",
+                        "gemini-2.5",
+                        "gemini-1.5-pro",
+                        "gemini-1.5-flash"
+                    ]
+                    if self.ai_model.get() not in ai_model_combo['values']:
+                        self.ai_model.set("gemini-2.5-flash")
+            
+            self.ai_service.trace('w', update_models)
+            update_models()
+            config_row += 1
+            
+            # API Key
+            key_label = tk.Label(self.ai_config_frame, text="API Key", 
+                               font=("Helvetica Neue", 13, "bold"),
+                               bg='#21262D', fg='#C9D1D9',
+                               anchor='w')
+            key_label.grid(row=config_row, column=0, sticky=tk.W, pady=(0, 6), padx=(0, 20))
+            self.ai_api_key = tk.StringVar()
+            key_frame = tk.Frame(self.ai_config_frame, bg='#21262D')
+            key_frame.grid(row=config_row, column=1, sticky=(tk.W, tk.E), pady=(0, 24))
+            key_frame.columnconfigure(0, weight=1)
+            ai_key_entry = ttk.Entry(key_frame, textvariable=self.ai_api_key, width=40, 
+                                show="*")
+            ai_key_entry.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=(0, 8))
+            key_show_btn = ttk.Button(key_frame, text="显示", width=10,
+                  command=lambda: self.toggle_key_visibility(ai_key_entry))
+            key_show_btn.grid(row=0, column=1)
+            config_row += 1
+            
+            # 测试连接按钮
+            test_btn_frame = tk.Frame(self.ai_config_frame, bg='#21262D')
+            test_btn_frame.grid(row=config_row, column=0, columnspan=2, pady=(8, 0), sticky=tk.W)
+            test_btn = ttk.Button(test_btn_frame, text="测试连接", width=16,
+                  command=self.test_ai_connection)
+            test_btn.pack(side=tk.LEFT, padx=(0, 12))
+            self.test_status_label = tk.Label(test_btn_frame, text="", 
+                                            font=("Helvetica Neue", 12),
+                                            bg='#21262D', fg='#8B949E')
+            self.test_status_label.pack(side=tk.LEFT)
         
-        # 仓库地址（单项目模式）
-        ttk.Label(main_frame, text="仓库地址:").grid(row=row, column=0, sticky=tk.W, pady=5)
-        self.repo = tk.StringVar()
-        ttk.Entry(main_frame, textvariable=self.repo, width=50).grid(
-            row=row, column=1, sticky=(tk.W, tk.E), pady=5)
-        row += 1
-        
-        # 扫描所有项目选项
-        self.scan_all = tk.BooleanVar()
-        ttk.Checkbutton(main_frame, text="自动扫描所有项目（不填仓库地址时启用）", 
-                        variable=self.scan_all).grid(
-            row=row, column=1, sticky=tk.W, pady=5)
-        row += 1
-        
-        # 分支
-        ttk.Label(main_frame, text="分支:").grid(row=row, column=0, sticky=tk.W, pady=5)
-        self.branch = tk.StringVar()
-        ttk.Entry(main_frame, textvariable=self.branch, width=50).grid(
-            row=row, column=1, columnspan=2, sticky=(tk.W, tk.E), pady=5)
-        row += 1
-        
-        # 提交者
-        ttk.Label(main_frame, text="提交者:").grid(row=row, column=0, sticky=tk.W, pady=5)
-        self.author = tk.StringVar(value="MIZUKI")
-        ttk.Entry(main_frame, textvariable=self.author, width=50).grid(
-            row=row, column=1, columnspan=2, sticky=(tk.W, tk.E), pady=5)
-        row += 1
-        
-        # 访问令牌
-        ttk.Label(main_frame, text="访问令牌:").grid(row=row, column=0, sticky=tk.W, pady=5)
-        self.token = tk.StringVar()
-        token_entry = ttk.Entry(main_frame, textvariable=self.token, width=50, show="*")
-        token_entry.grid(row=row, column=1, sticky=(tk.W, tk.E), pady=5)
-        ttk.Button(main_frame, text="显示", width=8,
-                  command=lambda: self.toggle_token_visibility(token_entry)).grid(
-            row=row, column=2, padx=(5, 0), pady=5)
-        row += 1
-        
-        # 日期选择
-        date_frame = ttk.Frame(main_frame)
-        date_frame.grid(row=row, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
-        
-        self.use_today = tk.BooleanVar(value=True)
-        ttk.Checkbutton(date_frame, text="今天", variable=self.use_today,
-                       command=self.toggle_date_inputs).grid(row=0, column=0, sticky=tk.W)
-        
-        ttk.Label(date_frame, text="起始日期:").grid(row=0, column=1, padx=(20, 5))
-        self.since_date = tk.StringVar()
-        self.since_entry = ttk.Entry(date_frame, textvariable=self.since_date, width=12)
-        self.since_entry.grid(row=0, column=2)
-        ttk.Label(date_frame, text="(YYYY-MM-DD)").grid(row=0, column=3, padx=(5, 0))
-        
-        ttk.Label(date_frame, text="结束日期:").grid(row=0, column=4, padx=(20, 5))
-        self.until_date = tk.StringVar()
-        self.until_entry = ttk.Entry(date_frame, textvariable=self.until_date, width=12)
-        self.until_entry.grid(row=0, column=5)
-        ttk.Label(date_frame, text="(YYYY-MM-DD)").grid(row=0, column=6, padx=(5, 0))
-        
-        # 添加日期格式提示
-        date_hint = ttk.Label(date_frame, text="提示: 日期格式为 YYYY-MM-DD，例如: 2025-12-12", 
-                             font=("Arial", 9), foreground="gray")
-        date_hint.grid(row=1, column=0, columnspan=7, pady=(5, 0), sticky=tk.W)
-        
-        self.toggle_date_inputs()
-        row += 1
-        
-        # 输出格式选择
-        format_frame = ttk.LabelFrame(main_frame, text="输出格式", padding="10")
-        format_frame.grid(row=row, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10)
-        format_frame.columnconfigure(0, weight=1)
-        
-        self.output_format = tk.StringVar(value="daily_report")
-        ttk.Radiobutton(format_frame, text="Markdown 提交日志", 
-                       variable=self.output_format, value="commits").grid(
-            row=0, column=0, sticky=tk.W, pady=2)
-        ttk.Radiobutton(format_frame, text="开发日报 (Markdown)", 
-                       variable=self.output_format, value="daily_report").grid(
-            row=1, column=0, sticky=tk.W, pady=2)
-        ttk.Radiobutton(format_frame, text="统计报告 (代码统计与评分)", 
-                       variable=self.output_format, value="statistics").grid(
-            row=2, column=0, sticky=tk.W, pady=2)
-        ttk.Radiobutton(format_frame, text="HTML 格式", 
-                       variable=self.output_format, value="html").grid(
-            row=3, column=0, sticky=tk.W, pady=2)
-        ttk.Radiobutton(format_frame, text="PNG 图片", 
-                       variable=self.output_format, value="png").grid(
-            row=4, column=0, sticky=tk.W, pady=2)
-        row += 1
-        
-        # 输出文件路径
-        ttk.Label(main_frame, text="输出文件:").grid(row=row, column=0, sticky=tk.W, pady=5)
-        self.output_file = tk.StringVar()
-        output_frame = ttk.Frame(main_frame)
-        output_frame.grid(row=row, column=1, columnspan=2, sticky=(tk.W, tk.E), pady=5)
-        output_frame.columnconfigure(0, weight=1)
-        ttk.Entry(output_frame, textvariable=self.output_file, width=40).grid(
-            row=0, column=0, sticky=(tk.W, tk.E))
-        ttk.Button(output_frame, text="浏览", width=8,
-                  command=self.browse_output_file).grid(row=0, column=1, padx=(5, 0))
-        row += 1
-        
-        # 执行按钮
-        button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=row, column=0, columnspan=3, pady=20)
-        self.generate_btn = ttk.Button(button_frame, text="生成日志", 
-                                       command=self.generate_logs, width=20)
-        self.generate_btn.pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="清空日志", 
-                  command=self.clear_logs, width=20).pack(side=tk.LEFT, padx=5)
-        row += 1
-        
-        # 日志输出区域
-        log_frame = ttk.LabelFrame(main_frame, text="执行日志", padding="5")
-        log_frame.grid(row=row, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=10)
-        log_frame.columnconfigure(0, weight=1)
-        log_frame.rowconfigure(0, weight=1)
-        main_frame.rowconfigure(row, weight=1)
-        
-        self.log_text = scrolledtext.ScrolledText(log_frame, height=15, width=80)
-        self.log_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
-        # 初始日志
-        self.log("欢迎使用 GitLab 提交日志生成工具！")
-        self.log("请填写参数后点击'生成日志'按钮。")
+            # 初始隐藏AI配置
+            self.ai_config_frame.grid_remove()
+            
+            # ========== 底部操作区域（添加到可滚动容器中） ==========
+            # 执行按钮区域 - 暗黑主题
+            button_container = tk.Frame(self.content_container, bg='#0D1117', 
+                                      borderwidth=1, highlightbackground='#30363D',
+                                      height=70)
+            button_container.pack(fill=tk.X, padx=0, pady=(20, 0))
+            button_container.pack_propagate(False)
+            
+            button_frame = tk.Frame(button_container, bg='#0D1117')
+            button_frame.pack(pady=16)
+            
+            # 主按钮 - GitHub绿色
+            self.generate_btn = ttk.Button(button_frame, text="生成日志", 
+                                       command=self.generate_logs, width=18)
+            self.generate_btn.pack(side=tk.LEFT, padx=6)
+            
+            # 次要按钮
+            clear_btn = ttk.Button(button_frame, text="清空日志", 
+                  command=self.clear_logs, width=18, style='Secondary.TButton')
+            clear_btn.pack(side=tk.LEFT, padx=6)
+            
+            # AI分析按钮
+            self.ai_analysis_btn = ttk.Button(button_frame, text="执行AI分析", 
+                                          command=self._manual_ai_analysis, width=18, 
+                                          state='normal', style='Secondary.TButton')
+            self.ai_analysis_btn.pack(side=tk.LEFT, padx=6)
+            
+            # 日志输出区域 - 暗黑主题
+            log_container = tk.Frame(self.content_container, bg='#0D1117')
+            log_container.pack(fill=tk.BOTH, expand=True, padx=0, pady=(0, 20))
+            
+            log_title_frame = tk.Frame(log_container, bg='#0D1117', 
+                                     borderwidth=0, highlightbackground='#30363D',
+                                     height=50)
+            log_title_frame.pack(fill=tk.X, padx=0, pady=0)
+            log_title_frame.pack_propagate(False)
+            
+            log_title = tk.Label(log_title_frame, text="执行日志", 
+                               font=("Helvetica Neue", 13, "bold"),
+                               bg='#0D1117', fg='#C9D1D9',
+                               anchor='w')
+            log_title.pack(side=tk.LEFT, padx=20, pady=14)
+            
+            log_card = tk.Frame(log_container, bg='#161B22', 
+                              borderwidth=1, highlightbackground='#30363D',
+                              relief='flat')
+            log_card.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
+            
+            # 配置日志文本区域样式 - 暗黑主题
+            self.log_text = scrolledtext.ScrolledText(log_card, height=12, width=80, 
+                                                  font=("Menlo", 11), 
+                                                  wrap=tk.WORD,
+                                                  bg='#0D1117',
+                                                  fg='#C9D1D9',
+                                                  insertbackground='#238636',
+                                                  selectbackground='#238636',
+                                                  selectforeground='white',
+                                                  borderwidth=0,
+                                                  relief='flat',
+                                                  padx=20,
+                                                  pady=20)
+            self.log_text.pack(fill=tk.BOTH, expand=True)
+            
+            # 默认显示第一个标签页
+            self._switch_tab("GitLab配置")
+            
+            # 初始日志
+            self.log("欢迎使用 GitLab 提交日志生成工具！")
+            self.log("请填写参数后点击'生成日志'按钮。")
+        except Exception as e:
+            import traceback
+            error_msg = f"界面初始化失败: {str(e)}\n\n{traceback.format_exc()}"
+            print(error_msg)
+            # 尝试显示错误
+            try:
+                messagebox.showerror("初始化错误", error_msg)
+            except:
+                pass
+            raise
+    
+    def _switch_tab(self, tab_name):
+        """切换标签页（自定义实现，确保对齐）"""
+        try:
+            # 隐藏所有标签页
+            for name, frame in self.tab_frames.items():
+                frame.pack_forget()
+            
+            # 显示选中的标签页
+            if tab_name in self.tab_frames:
+                self.tab_frames[tab_name].pack(fill=tk.BOTH, expand=True)
+                self.current_tab = tab_name
+            
+            # 更新按钮样式 - 使用更柔和的颜色
+            for name, btn in self.tab_buttons:
+                if name == tab_name:
+                    # 选中状态 - 使用更柔和的颜色
+                    btn.config(bg='#161B22', fg='#8B949E',  # 选中时使用中等灰色，不要太亮
+                              activebackground='#161B22',
+                              activeforeground='#8B949E')
+                else:
+                    # 未选中状态 - 使用更暗的颜色
+                    btn.config(bg='#21262D', fg='#6E7681',  # 未选中时使用更暗的灰色
+                              activebackground='#21262D',
+                              activeforeground='#6E7681')
+            
+            self.root.update_idletasks()
+        except Exception as e:
+            print(f"切换标签页错误: {e}")
     
     def toggle_token_visibility(self, entry):
         """切换令牌显示/隐藏（优化响应速度）"""
@@ -223,157 +818,136 @@ class Git2LogsGUI:
                 entry.config(show='')
             else:
                 entry.config(show='*')
-            # 立即更新界面
+            # 立即更新界面并设置焦点
+            entry.focus_set()
             self.root.update_idletasks()
         except Exception:
             pass  # 忽略异常，避免界面卡顿
+    
+    def toggle_key_visibility(self, entry):
+        """切换API Key显示/隐藏"""
+        try:
+            if entry.cget('show') == '*':
+                entry.config(show='')
+            else:
+                entry.config(show='*')
+            # 立即更新界面并设置焦点
+            entry.focus_set()
+            self.root.update_idletasks()
+        except Exception:
+            pass
+    
+    def toggle_ai_config(self):
+        """切换AI配置区域的显示/隐藏"""
+        try:
+            if self.ai_enabled.get():
+                self.ai_config_frame.grid()
+            else:
+                self.ai_config_frame.grid_remove()
+            self.root.update_idletasks()
+        except Exception:
+            pass
     
     def toggle_date_inputs(self):
-        """切换日期输入框的启用状态（优化响应速度）"""
+        """切换日期输入框的启用/禁用状态"""
         try:
-            state = 'disabled' if self.use_today.get() else 'normal'
-            self.since_entry.config(state=state)
-            self.until_entry.config(state=state)
-            # 立即更新界面
+            if self.use_today.get():
+                self.since_entry.config(state='disabled')
+                self.until_entry.config(state='disabled')
+            else:
+                self.since_entry.config(state='normal')
+                self.until_entry.config(state='normal')
             self.root.update_idletasks()
         except Exception:
-            pass  # 忽略异常，避免界面卡顿
+            pass
     
-    def _validate_date_format(self, date_str):
-        """验证日期格式是否为 YYYY-MM-DD"""
+    def on_output_format_changed(self, *args):
+        """输出格式变化时的回调"""
         try:
-            from datetime import datetime
-            datetime.strptime(date_str, '%Y-%m-%d')
-            return True
-        except ValueError:
-            return False
+            format_value = self.output_format.get()
+            if format_value == "all":
+                self.output_label.config(text="输出目录:")
+                self.output_hint.config(text="提示: 批量生成时请选择目录，所有文件将保存到该目录")
+            else:
+                self.output_label.config(text="输出文件:")
+                self.output_hint.config(text="提示: 批量生成时请选择目录")
+            self.root.update_idletasks()
+        except Exception:
+            pass
     
     def browse_output_file(self):
-        """浏览选择输出文件或目录（优化响应速度）"""
-        # 立即更新界面，确保按钮点击响应
-        self.root.update_idletasks()
-        
-        format_ext = {
-            'commits': '.md',
-            'daily_report': '.md',
-            'html': '.html',
-            'png': '.png'
-        }
-        ext = format_ext.get(self.output_format.get(), '.md')
-        
-        # 询问用户是选择文件还是目录
+        """浏览输出文件/目录"""
         try:
-            choice = messagebox.askyesnocancel(
-                "选择输出位置",
-                "选择输出位置：\n\n是 = 选择文件\n否 = 选择目录（自动生成文件名）\n取消 = 取消"
-            )
-            
-            if choice is None:  # 取消
-                return
-            elif choice:  # 选择文件
-                filename = filedialog.asksaveasfilename(
-                    defaultextension=ext,
-                    filetypes=[("所有文件", "*.*"), 
-                              ("Markdown", "*.md"),
-                              ("HTML", "*.html"),
-                              ("PNG", "*.png")])
-                if filename:
-                    self.output_file.set(filename)
-            else:  # 选择目录
-                directory = filedialog.askdirectory(title="选择输出目录")
+            format_value = self.output_format.get()
+            if format_value == "all":
+                # 选择目录
+                directory = filedialog.askdirectory(
+                    title="选择输出目录",
+                    initialdir=self.output_file.get().strip() or os.getcwd()
+                )
                 if directory:
                     self.output_file.set(directory)
+            else:
+                # 选择文件
+                filename = filedialog.asksaveasfilename(
+                    title="选择输出文件",
+                    initialdir=self.output_file.get().strip() or os.getcwd(),
+                    defaultextension=".md",
+                    filetypes=[("Markdown文件", "*.md"), ("所有文件", "*.*")]
+                )
+                if filename:
+                    self.output_file.set(filename)
+            self.root.update_idletasks()
         except Exception as e:
-            # 捕获异常，避免对话框阻塞
-            messagebox.showerror("错误", f"选择文件时出错: {str(e)}")
+            messagebox.showerror("错误", f"选择文件/目录失败: {str(e)}")
     
     def log(self, message):
-        """添加日志（优化性能，减少界面更新频率）"""
-        self.log_text.insert(tk.END, f"{message}\n")
-        self.log_text.see(tk.END)
-        # 减少 update_idletasks 调用频率，避免界面卡顿
-        # 只在必要时更新界面（每10次调用更新一次，或重要操作时立即更新）
-        if not hasattr(self, '_log_count'):
-            self._log_count = 0
-        self._log_count += 1
-        if self._log_count % 10 == 0 or '错误' in message or '成功' in message or '完成' in message:
+        """添加日志消息"""
+        try:
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            log_message = f"{timestamp} - {message}\n"
+            self.log_text.insert(tk.END, log_message)
+            self.log_text.see(tk.END)
+            self._log_count += 1
+            # 限制日志长度，避免内存占用过大
+            if self._log_count > 1000:
+                self.log_text.delete(1.0, "100.0")
+                self._log_count = 900
             self.root.update_idletasks()
+        except Exception:
+            pass
     
     def clear_logs(self):
         """清空日志"""
-        self.log_text.delete(1.0, tk.END)
-    
-    def validate_inputs(self):
-        """验证输入"""
-        gitlab_url = self.gitlab_url.get().strip()
-        
-        # 检查是否是占位符文本
-        placeholder_text = "https://gitlab.com 或 http://gitlab.yourcompany.com"
-        if not gitlab_url or gitlab_url == placeholder_text:
-            messagebox.showerror("错误", "请输入真实的 GitLab URL\n\n例如：\n- https://gitlab.com\n- http://gitlab.yourcompany.com")
-            return False
-        
-        # 检查是否是示例地址
-        if "gitlab.example.com" in gitlab_url.lower():
-            result = messagebox.askyesno(
-                "提示", 
-                "检测到您使用的是示例地址 'gitlab.example.com'\n\n"
-                "这是一个占位符地址，无法连接。\n\n"
-                "请使用您真实的 GitLab 实例地址，例如：\n"
-                "- https://gitlab.com\n"
-                "- http://gitlab.yourcompany.com\n\n"
-                "是否继续尝试连接？"
-            )
-            if not result:
-                return False
-        
-        if not self.scan_all.get() and not self.repo.get().strip():
-            messagebox.showerror("错误", "请输入仓库地址或选择'自动扫描所有项目'")
-            return False
-        
-        if not self.author.get().strip():
-            messagebox.showerror("错误", "请输入提交者姓名")
-            return False
-        
-        if not self.token.get().strip():
-            messagebox.showerror("错误", "请输入访问令牌")
-            return False
-        
-        return True
+        try:
+            self.log_text.delete(1.0, tk.END)
+            self._log_count = 0
+            self.log("日志已清空")
+        except Exception:
+            pass
     
     def generate_logs(self):
-        """生成日志"""
-        if not self.validate_inputs():
-            return
-        
-        # 禁用按钮
-        self.generate_btn.config(state='disabled')
-        self.clear_logs()
-        
-        # 在新线程中执行，避免界面冻结
-        thread = threading.Thread(target=self._generate_logs_thread)
-        thread.daemon = True
-        thread.start()
-    
-    def _generate_logs_thread(self):
-        """在后台线程中生成日志"""
-        # 检查是否是打包后的环境
-        is_frozen = hasattr(sys, '_MEIPASS')
-        
-        if is_frozen:
-            # 打包后的环境：直接导入模块并调用
-            self._run_git2logs_direct()
-        else:
-            # 开发环境：使用 subprocess 调用脚本
-            self._run_git2logs_subprocess()
+        """生成日志的主函数"""
+        try:
+            self.generate_btn.config(state='disabled')
+            thread = threading.Thread(target=self._run_git2logs_direct)
+            thread.daemon = True
+            thread.start()
+        except Exception as e:
+            self.log(f"✗ 启动生成任务失败: {str(e)}")
+            self.generate_btn.config(state='normal')
     
     def _run_git2logs_direct(self):
-        """直接调用 git2logs 模块（打包后的环境）"""
+        """在后台线程中执行git2logs"""
         try:
+            from datetime import datetime
+            
             from git2logs import (
                 create_gitlab_client, scan_all_projects, get_commits_by_author,
                 group_commits_by_date, generate_markdown_log, generate_multi_project_markdown,
-                generate_daily_report, generate_statistics_report, extract_gitlab_url, parse_project_identifier
+                generate_daily_report, generate_statistics_report, generate_all_reports,
+                analyze_with_ai, generate_ai_analysis_report, generate_local_analysis_report,
+                extract_gitlab_url, parse_project_identifier
             )
             import logging
             
@@ -385,573 +959,548 @@ class Git2LogsGUI:
                     self.gui_log_func = gui_log_func
                 
                 def emit(self, record):
-                    msg = self.format(record)
-                    self.gui_log_func(msg)
+                    try:
+                        msg = self.format(record)
+                        self.gui_log_func(msg)
+                    except Exception:
+                        pass
             
-            # 获取根 logger（git2logs.py 使用根 logger）
-            root_logger = logging.getLogger()
             gui_handler = GUILogHandler(self.log)
-            gui_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+            gui_handler.setLevel(logging.INFO)
+            formatter = logging.Formatter('%(levelname)s - %(message)s')
+            gui_handler.setFormatter(formatter)
+            
+            # 获取根日志记录器并添加处理器
+            root_logger = logging.getLogger()
             root_logger.addHandler(gui_handler)
             root_logger.setLevel(logging.INFO)
             
-            # 准备参数
+            self.log("=" * 60)
+            self.log("开始生成日志...")
+            
+            # 获取配置
             gitlab_url = self.gitlab_url.get().strip()
-            # 清除占位符文本
+            token = self.token.get().strip()
+            author = self.author.get().strip()
+            repo = self.repo.get().strip()
+            branch = self.branch.get().strip() if hasattr(self, 'branch') and self.branch.get().strip() else None
+            
+            # 检查占位符
             placeholder_text = "https://gitlab.com 或 http://gitlab.yourcompany.com"
             if gitlab_url == placeholder_text:
                 gitlab_url = ""
             
-            # 处理提交者名称格式
-            author_input = self.author.get().strip()
-            if '<' in author_input and '>' in author_input:
-                email_match = author_input.split('<')[1].split('>')[0]
-                author_to_use = email_match.strip()
-                self.log(f"从 '{author_input}' 中提取邮箱: {author_to_use}")
-            else:
-                author_to_use = author_input
+            # 验证必要参数
+            if not gitlab_url or not token or not author:
+                self.log("✗ 错误: 请填写GitLab URL、访问令牌和提交者")
+                self.root.after(0, lambda: messagebox.showerror("错误", "请填写GitLab URL、访问令牌和提交者"))
+                self.root.after(0, lambda: self.generate_btn.config(state='normal'))
+                return
             
-            token = self.token.get().strip()
+            # 日期处理
+            since_date = None
+            until_date = None
+            if not self.use_today.get():
+                since_date = self.since_date.get().strip()
+                until_date = self.until_date.get().strip()
+                if not since_date or not until_date:
+                    self.log("✗ 错误: 请填写起始日期和结束日期")
+                    self.root.after(0, lambda: messagebox.showerror("错误", "请填写起始日期和结束日期"))
+                    self.root.after(0, lambda: self.generate_btn.config(state='normal'))
+                    return
             
-            # 日期参数
-            if self.use_today.get():
-                today = datetime.now().strftime('%Y-%m-%d')
-                since_date = today
-                until_date = today
-            else:
-                since_date = self.since_date.get().strip() if self.since_date.get().strip() else None
-                until_date = self.until_date.get().strip() if self.until_date.get().strip() else None
-            
-            branch = self.branch.get().strip() if self.branch.get().strip() else None
-            output_format = self.output_format.get()
-            is_daily_report = (output_format == 'daily_report')
-            is_statistics = (output_format == 'statistics')
-            
-            # 输出文件
-            output_file = self.output_file.get().strip()
-            actual_output_file = None
-            
-            if output_file:
-                if os.path.isdir(output_file):
-                    today = datetime.now().strftime('%Y-%m-%d')
-                    branch_suffix = f"_{branch}" if branch else ""
-                    if is_statistics:
-                        filename = f"{today}_statistics{branch_suffix}.md"
-                    elif is_daily_report:
-                        filename = f"{today}_daily_report{branch_suffix}.md"
-                    else:
-                        filename = f"{today}_commits{branch_suffix}.md"
-                    actual_output_file = os.path.join(output_file, filename)
-                    self.log(f"输出路径是目录，自动生成文件名: {actual_output_file}")
-                else:
-                    actual_output_file = output_file
-                    if not os.path.splitext(actual_output_file)[1]:
-                        actual_output_file = actual_output_file + '.md'
-            else:
-                today = datetime.now().strftime('%Y-%m-%d')
-                branch_suffix = f"_{branch}" if branch else ""
-                if is_statistics:
-                    actual_output_file = f"{today}_statistics{branch_suffix}.md"
-                elif is_daily_report:
-                    actual_output_file = f"{today}_daily_report{branch_suffix}.md"
-                else:
-                    actual_output_file = f"{today}_commits{branch_suffix}.md"
-            
-            self.log("=" * 60)
-            
-            # 创建 GitLab 客户端
+            # 创建GitLab客户端
+            self.log(f"正在连接到 GitLab: {gitlab_url}")
             gl = create_gitlab_client(gitlab_url, token)
             
-            found_commits = False
-            no_commits_warning = False
+            # 获取提交记录
+            all_results = {}
             
-            if self.scan_all.get():
-                # 扫描所有项目
-                self.log(f"使用自动扫描模式，GitLab 实例: {gitlab_url}")
+            if self.scan_all.get() or not repo:
+                # 自动扫描所有项目
+                self.log("正在扫描所有项目...")
                 all_results = scan_all_projects(
-                    gl, author_to_use,
+                    gl, author,
                     since_date=since_date,
                     until_date=until_date,
                     branch=branch
                 )
-                
-                if not all_results:
-                    no_commits_warning = True
-                    self.log("⚠ 未在任何项目中找到提交记录")
-                else:
-                    found_commits = True
-                    # 生成 Markdown
-                    # 生成 Markdown 内容
-                    try:
-                        if is_statistics:
-                            self.log("正在生成统计报告...")
-                            markdown_content = generate_statistics_report(
-                                all_results, author_to_use,
-                                since_date=since_date, until_date=until_date
-                            )
-                            self.log("统计报告生成完成")
-                        elif is_daily_report:
-                            self.log("正在生成开发日报...")
-                            markdown_content = generate_daily_report(
-                                all_results, author_to_use,
-                                since_date=since_date, until_date=until_date
-                            )
-                            self.log("开发日报生成完成")
-                        else:
-                            self.log("正在生成提交日志...")
-                            markdown_content = generate_multi_project_markdown(
-                                all_results, author_to_use,
-                                since_date=since_date, until_date=until_date
-                            )
-                            self.log("提交日志生成完成")
-                        
-                        # 保存文件
-                        self.log(f"正在保存文件到: {actual_output_file}")
-                        with open(actual_output_file, 'w', encoding='utf-8') as f:
-                            f.write(markdown_content)
-                        self.log(f"✓ 文件已成功保存到: {actual_output_file}")
-                        self.log(f"文件大小: {len(markdown_content)} 字符")
-                    except Exception as e:
-                        self.log(f"✗ 生成或保存文件时出错: {str(e)}")
-                        import traceback
-                        self.log(traceback.format_exc())
-                        raise
+                self.log(f"扫描完成，共在 {len(all_results)} 个项目中找到提交记录")
             else:
                 # 单项目模式
-                repo = self.repo.get().strip()
                 extracted_url = extract_gitlab_url(repo)
                 if extracted_url:
                     gitlab_url = extracted_url
                     self.log(f"从仓库 URL 提取 GitLab 实例: {gitlab_url}")
                     gl = create_gitlab_client(gitlab_url, token)
                 
-                project_id = parse_project_identifier(repo)
-                self.log(f"项目标识符: {project_id}")
+                project_identifier = parse_project_identifier(repo)
+                self.log(f"正在获取项目: {project_identifier}")
                 
-                project = gl.projects.get(project_id)
-                self.log(f"成功获取项目: {project.name}")
-                
-                commits = get_commits_by_author(
-                    project, author_to_use,
-                    since_date=since_date,
-                    until_date=until_date,
-                    branch=branch
+                try:
+                    project = gl.projects.get(project_identifier)
+                    commits = get_commits_by_author(
+                        project, author,
+                        since_date=since_date,
+                        until_date=until_date,
+                        branch=branch
+                    )
+                    if commits:
+                        all_results[project_identifier] = {
+                            'project': project,
+                            'commits': commits
+                        }
+                        self.log(f"✓ 找到 {len(commits)} 条提交记录")
+                except Exception as e:
+                    self.log(f"✗ 获取项目失败: {str(e)}")
+            
+            if not all_results:
+                self.log("✗ 未找到任何提交记录")
+                self.root.after(0, lambda: messagebox.showwarning("提示", "未找到任何提交记录"))
+                self.root.after(0, lambda: self.generate_btn.config(state='normal'))
+                return
+            
+            # 确定输出路径
+            output_path = self.output_file.get().strip()
+            if not output_path:
+                output_path = os.getcwd()
+                self.log(f"未指定输出路径，使用当前目录: {output_path}")
+            
+            # 根据输出格式生成报告
+            output_format = self.output_format.get()
+            self.log(f"输出格式: {output_format}")
+            
+            generated_files = {}
+            
+            if output_format == "statistics":
+                # 生成统计报告
+                self.log("正在生成统计报告...")
+                report_content = generate_statistics_report(
+                    all_results, author,
+                    since_date=since_date, until_date=until_date
                 )
                 
-                if not commits:
-                    no_commits_warning = True
-                    self.log("⚠ 未找到提交记录")
+                if os.path.isdir(output_path):
+                    date_prefix = since_date if since_date and until_date and since_date == until_date else datetime.now().strftime('%Y-%m-%d')
+                    output_file = os.path.join(output_path, f"{date_prefix}_statistics.md")
                 else:
-                    found_commits = True
-                    grouped_commits = group_commits_by_date(commits)
-                    markdown_content = generate_markdown_log(
-                        grouped_commits, author_to_use, repo_name=project.name
+                    output_file = output_path
+                
+                with open(output_file, 'w', encoding='utf-8') as f:
+                    f.write(report_content)
+                
+                generated_files['statistics'] = output_file
+                self.log(f"✓ 统计报告已保存: {output_file}")
+                self.log("💡 提示: 统计报告包含本地多维度评价，AI分析需要手动触发")
+                
+                # 如果AI已启用，保存数据供手动分析
+                if self.ai_enabled.get() and self.ai_api_key.get().strip():
+                    self._pending_ai_data = {
+                        'all_results': all_results,
+                        'author': author,
+                        'output_dir': os.path.dirname(output_file),
+                        'since_date': since_date,
+                        'until_date': until_date,
+                        'generated_files': generated_files
+                    }
+                    self.log("💡 提示: 数据已保存，可以点击'执行AI分析'按钮进行AI分析")
+            elif output_format == "all":
+                # 批量生成所有格式
+                self.log("正在批量生成所有格式...")
+                generated_files = generate_all_reports(
+                    all_results, author, output_path,
+                    since_date=since_date, until_date=until_date
+                )
+                self.log(f"✓ 批量生成完成，共生成 {len(generated_files)} 个文件")
+                for file_type, file_path in generated_files.items():
+                    self.log(f"  - {file_type}: {file_path}")
+            else:
+                # 其他格式（commits, daily_report, html, png）
+                self.log(f"正在生成 {output_format} 格式...")
+                if output_format == "commits":
+                    if len(all_results) == 1:
+                        report_content = generate_markdown_log(list(all_results.values())[0]['commits'])
+                    else:
+                        report_content = generate_multi_project_markdown(all_results)
+                elif output_format == "daily_report":
+                    report_content = generate_daily_report(
+                        all_results, author,
+                        since_date=since_date, until_date=until_date
                     )
-                    
-                    with open(actual_output_file, 'w', encoding='utf-8') as f:
-                        f.write(markdown_content)
-                    self.log(f"日志已保存到: {actual_output_file}")
-            
-            # 日志已经通过 GUI handler 实时输出，无需再次读取
-            
-            # 检查文件
-            file_exists = os.path.exists(actual_output_file) if actual_output_file else False
+                else:
+                    # html 和 png 格式需要特殊处理
+                    self.log(f"✗ 暂不支持 {output_format} 格式的直接生成")
+                    self.root.after(0, lambda: self.generate_btn.config(state='normal'))
+                    return
+                
+                if os.path.isdir(output_path):
+                    date_prefix = since_date if since_date and until_date and since_date == until_date else datetime.now().strftime('%Y-%m-%d')
+                    output_file = os.path.join(output_path, f"{date_prefix}_{output_format}.md")
+                else:
+                    output_file = output_path
+                
+                with open(output_file, 'w', encoding='utf-8') as f:
+                    f.write(report_content)
+                
+                generated_files[output_format] = output_file
+                self.log(f"✓ 报告已保存: {output_file}")
             
             self.log("=" * 60)
+            self.log("✓ 生成完成！")
             
-            if no_commits_warning or not found_commits:
-                self.log("⚠ 未找到提交记录")
-                self.log("可能的原因：")
-                self.log("  1. 指定日期范围内没有提交")
-                self.log("  2. 提交者名称不匹配（请检查 GitLab 中的实际提交者名称）")
-                self.log("  3. 指定的分支不存在或没有权限访问")
-                self.log("  4. 访问令牌权限不足")
-                messagebox.showwarning("警告", 
-                    "未找到提交记录。\n\n请检查：\n"
-                    "1. 日期范围是否正确\n"
-                    "2. 提交者名称是否匹配\n"
-                    "3. 分支名称是否正确\n"
-                    "4. 访问令牌权限是否足够")
-            elif file_exists:
-                self.log("✓ 日志生成成功！")
-                self.log(f"文件已保存: {actual_output_file}")
-                
-                # 如果需要生成 HTML 或 PNG
-                output_format = self.output_format.get()
-                if output_format in ['html', 'png']:
-                    self.log("\n正在生成 HTML/PNG 格式...")
-                    self._generate_html_or_png(actual_output_file)
-            else:
-                self.log("⚠ 命令执行成功，但未找到生成的文件")
-                self.log(f"预期文件: {actual_output_file}")
-                messagebox.showwarning("警告", 
-                    f"命令执行成功，但未找到生成的文件。\n\n预期文件: {actual_output_file}")
-        
+            # 重新启用按钮
+            self.root.after(0, lambda: self.generate_btn.config(state='normal'))
+            
         except Exception as e:
-            self.log(f"错误: {str(e)}")
+            self.log(f"✗ 生成失败: {str(e)}")
             import traceback
             self.log(traceback.format_exc())
-            messagebox.showerror("错误", f"执行出错: {str(e)}")
-        finally:
-            # 移除 GUI handler
-            root_logger.removeHandler(gui_handler)
-            gui_handler.close()
+            self.root.after(0, lambda: messagebox.showerror("错误", f"生成失败: {str(e)}"))
             self.root.after(0, lambda: self.generate_btn.config(state='normal'))
     
-    def _run_git2logs_subprocess(self):
-        """使用 subprocess 调用 git2logs.py（开发环境）"""
+    def _manual_ai_analysis(self):
+        """手动触发AI分析"""
         try:
-            # 构建命令
-            cmd = ['python3', 'git2logs.py']
+            if not self.ai_enabled.get() or not self.ai_api_key.get().strip():
+                messagebox.showwarning("提示", "请先启用AI分析并配置API Key")
+                return
             
-            # 添加参数
-            if self.scan_all.get():
-                cmd.append('--scan-all')
-            else:
-                cmd.extend(['--repo', self.repo.get().strip()])
+            # 检查是否有待处理的数据
+            if self._pending_ai_data:
+                result = messagebox.askyesno(
+                    "AI分析",
+                    "检测到当前会话的数据，是否使用当前会话的数据进行分析？\n\n"
+                    "选择'是'：使用当前会话的数据\n"
+                    "选择'否'：选择已生成的报告文件",
+                    icon='question'
+                )
+                if result:
+                    # 使用当前会话数据
+                    self.root.after(0, self._perform_ai_analysis)
+                    return
             
-            gitlab_url_value = self.gitlab_url.get().strip()
-            # 清除占位符文本
-            placeholder_text = "https://gitlab.com 或 http://gitlab.yourcompany.com"
-            if gitlab_url_value == placeholder_text:
-                gitlab_url_value = ""
-            cmd.extend(['--gitlab-url', gitlab_url_value])
-            
-            # 处理提交者名称格式（支持 "名称<邮箱>" 格式）
-            author_input = self.author.get().strip()
-            # 如果包含 < >，提取邮箱部分；否则使用原值
-            if '<' in author_input and '>' in author_input:
-                # 提取邮箱部分
-                email_match = author_input.split('<')[1].split('>')[0]
-                author_to_use = email_match.strip()
-                self.log(f"从 '{author_input}' 中提取邮箱: {author_to_use}")
-            else:
-                author_to_use = author_input
-            
-            cmd.extend(['--author', author_to_use])
-            cmd.extend(['--token', self.token.get().strip()])
-            
-            if self.branch.get().strip():
-                cmd.extend(['--branch', self.branch.get().strip()])
-            
-            # 日期参数
-            if self.use_today.get():
-                cmd.append('--today')
-            else:
-                since = self.since_date.get().strip()
-                until = self.until_date.get().strip()
-                
-                # 验证日期格式
-                if since:
-                    if not self._validate_date_format(since):
-                        self.log(f"错误: 起始日期格式不正确: {since}，应为 YYYY-MM-DD")
-                        messagebox.showerror("错误", f"起始日期格式不正确: {since}\n应为 YYYY-MM-DD 格式")
-                        return
-                    cmd.extend(['--since', since])
-                
-                if until:
-                    if not self._validate_date_format(until):
-                        self.log(f"错误: 结束日期格式不正确: {until}，应为 YYYY-MM-DD")
-                        messagebox.showerror("错误", f"结束日期格式不正确: {until}\n应为 YYYY-MM-DD 格式")
-                        return
-                    cmd.extend(['--until', until])
-                
-                # 如果两个日期都填写了，检查起始日期是否早于结束日期
-                if since and until:
-                    try:
-                        from datetime import datetime
-                        since_dt = datetime.strptime(since, '%Y-%m-%d')
-                        until_dt = datetime.strptime(until, '%Y-%m-%d')
-                        if since_dt > until_dt:
-                            self.log(f"警告: 起始日期 {since} 晚于结束日期 {until}")
-                            messagebox.showwarning("警告", f"起始日期晚于结束日期\n起始: {since}\n结束: {until}")
-                    except:
-                        pass
-            
-            # 输出格式
-            output_format = self.output_format.get()
-            if output_format == 'statistics':
-                cmd.append('--statistics')
-            elif output_format == 'daily_report':
-                cmd.append('--daily-report')
-            
-            # 输出文件
-            output_file = self.output_file.get().strip()
-            actual_output_file = None  # 保存实际使用的输出文件路径
-            
-            if output_file:
-                # 检查是否是目录
-                if os.path.isdir(output_file):
-                    # 如果是目录，自动生成文件名
-                    today = datetime.now().strftime('%Y-%m-%d')
-                    branch_suffix = f"_{self.branch.get().strip()}" if self.branch.get().strip() else ""
-                    if output_format == 'statistics':
-                        filename = f"{today}_statistics{branch_suffix}.md"
-                    elif output_format == 'daily_report':
-                        filename = f"{today}_daily_report{branch_suffix}.md"
-                    else:
-                        filename = f"{today}_commits{branch_suffix}.md"
-                    actual_output_file = os.path.join(output_file, filename)
-                    self.log(f"输出路径是目录，自动生成文件名: {actual_output_file}")
-                    cmd.extend(['--output', actual_output_file])
-                else:
-                    # 是文件路径，直接使用
-                    actual_output_file = output_file
-                    cmd.extend(['--output', actual_output_file])
-            else:
-                # 未指定输出文件，使用默认文件名（当前目录）
-                today = datetime.now().strftime('%Y-%m-%d')
-                branch_suffix = f"_{self.branch.get().strip()}" if self.branch.get().strip() else ""
-                if output_format == 'statistics':
-                    actual_output_file = f"{today}_statistics{branch_suffix}.md"
-                elif output_format == 'daily_report':
-                    actual_output_file = f"{today}_daily_report{branch_suffix}.md"
-                else:
-                    actual_output_file = f"{today}_commits{branch_suffix}.md"
-                # 不传递 --output 参数，让 git2logs.py 使用默认文件名
-            
-            self.log(f"执行命令: {' '.join(cmd[:cmd.index('--token')+1])} [令牌已隐藏] ...")
-            self.log("=" * 60)
-            
-            # 执行命令
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                universal_newlines=True
+            # 让用户选择报告文件
+            report_file = filedialog.askopenfilename(
+                title="选择报告文件（统计报告或日报）",
+                initialdir=self.output_file.get().strip() or os.getcwd(),
+                filetypes=[
+                    ("Markdown文件", "*.md"),
+                    ("所有文件", "*.*")
+                ]
             )
             
-            # 实时输出日志并检测是否有错误
-            found_commits = False
-            no_commits_warning = False
-            import re
+            if not report_file:
+                return
             
-            # 批量处理日志，减少界面更新频率
-            log_buffer = []
-            buffer_size = 5  # 每5行更新一次界面
-            
-            for line in process.stdout:
-                line_text = line.strip()
-                log_buffer.append(line_text)
-                
-                # 检测是否找到提交
-                if '找到' in line_text and ('条提交' in line_text or '个项目中找到' in line_text):
-                    # 提取数字
-                    numbers = re.findall(r'\d+', line_text)
-                    if numbers and int(numbers[0]) > 0:
-                        found_commits = True
-                
-                # 检测未找到提交的警告
-                if '未找到' in line_text and '提交' in line_text:
-                    no_commits_warning = True
-                if '未在任何项目中找到' in line_text:
-                    no_commits_warning = True
-                
-                # 批量输出日志
-                if len(log_buffer) >= buffer_size or '错误' in line_text or '完成' in line_text or '成功' in line_text:
-                    for log_line in log_buffer:
-                        self.log_text.insert(tk.END, f"{log_line}\n")
-                    self.log_text.see(tk.END)
-                    log_buffer = []
-                    # 重要消息立即更新界面
-                    if '错误' in line_text or '完成' in line_text or '成功' in line_text:
-                        self.root.update_idletasks()
-            
-            # 输出剩余的日志
-            for log_line in log_buffer:
-                self.log_text.insert(tk.END, f"{log_line}\n")
-            self.log_text.see(tk.END)
-            
-            process.wait()
-            
-            # 检查是否生成了输出文件
-            # 使用实际使用的输出文件路径
-            output_file_path = actual_output_file if actual_output_file else None
-            
-            if output_file_path:
-                # 如果文件不存在，尝试添加 .md 扩展名（因为 git2logs.py 会自动添加）
-                if not os.path.exists(output_file_path):
-                    # 检查是否有扩展名
-                    if not os.path.splitext(output_file_path)[1]:
-                        # 没有扩展名，尝试添加 .md
-                        output_file_path_with_ext = output_file_path + '.md'
-                        if os.path.exists(output_file_path_with_ext):
-                            output_file_path = output_file_path_with_ext
-                            self.log(f"找到文件（已添加扩展名）: {output_file_path}")
-            else:
-                # 使用默认文件名（当前目录）
-                today = datetime.now().strftime('%Y-%m-%d')
-                branch_suffix = f"_{self.branch.get().strip()}" if self.branch.get().strip() else ""
-                if output_format == 'statistics':
-                    output_file_path = f"{today}_statistics{branch_suffix}.md"
-                elif output_format == 'daily_report':
-                    output_file_path = f"{today}_daily_report{branch_suffix}.md"
-                else:
-                    output_file_path = f"{today}_commits{branch_suffix}.md"
-            
-            file_exists = os.path.exists(output_file_path) if output_file_path else False
-            
+            # 直接基于报告文件内容进行AI分析
             self.log("=" * 60)
+            self.log(f"选择的报告文件: {report_file}")
+            self.log("正在读取报告文件并发送给AI分析...")
             
-            if process.returncode == 0:
-                if no_commits_warning or not found_commits:
-                    self.log("⚠ 未找到提交记录")
-                    self.log("可能的原因：")
-                    self.log("  1. 指定日期范围内没有提交")
-                    self.log("  2. 提交者名称不匹配（请检查 GitLab 中的实际提交者名称）")
-                    self.log("  3. 指定的分支不存在或没有权限访问")
-                    self.log("  4. 访问令牌权限不足")
-                    messagebox.showwarning("警告", 
-                        "未找到提交记录。\n\n请检查：\n"
-                        "1. 日期范围是否正确\n"
-                        "2. 提交者名称是否匹配\n"
-                        "3. 分支名称是否正确\n"
-                        "4. 访问令牌权限是否足够")
-                elif file_exists:
-                    self.log("✓ 日志生成成功！")
-                    self.log(f"文件已保存: {output_file_path}")
-                    
-                    # 如果需要生成 HTML 或 PNG
-                    if output_format in ['html', 'png']:
-                        self.log("\n正在生成 HTML/PNG 格式...")
-                        self._generate_html_or_png(output_file_path)
-                else:
-                    self.log("⚠ 命令执行成功，但未找到生成的文件")
-                    self.log(f"预期文件: {output_file_path}")
-                    messagebox.showwarning("警告", 
-                        f"命令执行成功，但未找到生成的文件。\n\n预期文件: {output_file_path}")
-            else:
-                self.log("✗ 日志生成失败，请检查错误信息")
-                messagebox.showerror("错误", "日志生成失败，请查看执行日志")
-        
+            thread = threading.Thread(target=self._analyze_report_file_direct, args=(report_file,))
+            thread.daemon = True
+            thread.start()
+            
         except Exception as e:
-            self.log(f"错误: {str(e)}")
-            messagebox.showerror("错误", f"执行出错: {str(e)}")
+            self.log(f"✗ 启动AI分析失败: {str(e)}")
+            messagebox.showerror("错误", f"启动AI分析失败: {str(e)}")
+    
+    def _analyze_report_file_direct(self, report_file):
+        """直接基于报告文件内容进行AI分析（不需要GitLab数据）"""
+        import re
+        
+        try:
+            # 读取报告文件
+            with open(report_file, 'r', encoding='utf-8') as f:
+                report_content = f.read()
+            
+            self.log(f"✓ 报告文件读取成功，文件大小: {len(report_content)} 字符")
+            
+            # 从报告中提取作者和日期信息（用于生成报告）
+            author_match = re.search(r'\*\*提交者\*\*: (.+)', report_content)
+            author = author_match.group(1).strip() if author_match else "未知作者"
+            
+            # 提取日期范围
+            date_range_match = re.search(r'\*\*统计时间范围\*\*: (.+?) 至 (.+?)(?:\n|$)', report_content)
+            if date_range_match:
+                since_date = date_range_match.group(1).strip()
+                until_date = date_range_match.group(2).strip()
+            else:
+                # 尝试其他格式
+                since_match = re.search(r'\*\*起始日期\*\*: (.+?)(?:\n|$)', report_content)
+                until_match = re.search(r'\*\*结束日期\*\*: (.+?)(?:\n|$)', report_content)
+                since_date = since_match.group(1).strip() if since_match else None
+                until_date = until_match.group(1).strip() if until_match else None
+            
+            # 检查AI配置
+            if not self.ai_enabled.get() or not self.ai_api_key.get().strip():
+                self.log("✗ 错误: 请先配置AI服务并输入API Key")
+                self.root.after(0, lambda: messagebox.showerror("错误", "请先配置AI服务并输入API Key"))
+                return
+            
+            # 构建AI配置
+            ai_config = {
+                'service': self.ai_service.get(),
+                'api_key': self.ai_api_key.get().strip(),
+                'model': self.ai_model.get()
+            }
+            
+            self.log("")
+            self.log("=" * 60)
+            self.log("🤖 开始AI分析（基于报告文件内容）...")
+            self.log(f"提示: AI分析可能需要30秒到2分钟，超时时间: 120秒")
+            self.log(f"AI服务: {self.ai_service.get()}, 模型: {self.ai_model.get()}")
+            self.log(f"作者: {author}")
+            if since_date and until_date:
+                self.log(f"日期范围: {since_date} 至 {until_date}")
+            
+            # 调用AI分析
+            from ai_analysis import analyze_report_file
+            from git2logs import generate_ai_analysis_report
+            
+            analysis_result = analyze_report_file(report_content, ai_config, timeout=120)
+            
+            self.log("✓ AI分析完成，正在生成报告...")
+            
+            # 生成AI分析报告
+            ai_report_content = generate_ai_analysis_report(
+                analysis_result, author,
+                since_date=since_date, until_date=until_date
+            )
+            
+            # 保存AI分析报告到报告文件所在目录
+            report_dir = os.path.dirname(report_file)
+            date_prefix = since_date if since_date and until_date and since_date == until_date else datetime.now().strftime('%Y-%m-%d')
+            ai_report_file = os.path.join(report_dir, f"{date_prefix}_ai_analysis.md")
+            
+            with open(ai_report_file, 'w', encoding='utf-8') as f:
+                f.write(ai_report_content)
+            
+            self.log(f"✓ AI分析报告已保存: {ai_report_file}")
+            self.log(f"📄 文件大小: {len(ai_report_content)} 字符")
+            self.log("💡 提示: 文件名包含 '_ai_analysis' 表示这是AI分析报告")
+            self.log("=" * 60)
+            self.log("✓ AI分析完成！")
+            
+        except ImportError as e:
+            self.log(f"⚠ AI分析功能不可用: {str(e)}")
+            self.log("提示: 请运行 'pip install openai anthropic google-generativeai' 安装AI服务库")
+            self.root.after(0, lambda: messagebox.showerror("错误", f"AI分析功能不可用: {str(e)}"))
+        except TimeoutError as e:
+            self.log(f"⏱️ AI分析超时: {str(e)}")
+            self.log("可能的原因:")
+            self.log("  1. 网络连接较慢或不稳定")
+            self.log("  2. AI服务响应较慢")
+            self.log("  3. 报告文件内容较大，处理时间较长")
+            self.log("建议: 请检查网络连接，或稍后重试")
+            self.root.after(0, lambda: messagebox.showerror("错误", f"AI分析超时: {str(e)}"))
+        except ValueError as e:
+            error_msg = str(e)
+            self.log(f"🔑 AI分析失败（API密钥或配置问题）:")
+            self.log(f"   {error_msg}")
+            self.root.after(0, lambda: messagebox.showerror("错误", f"AI分析失败: {error_msg}"))
+        except ConnectionError as e:
+            error_msg = str(e)
+            self.log(f"🌐 AI分析失败（网络连接问题）:")
+            self.log(f"   {error_msg}")
+            self.root.after(0, lambda: messagebox.showerror("错误", f"网络连接失败: {error_msg}"))
+        except Exception as e:
+            self.log(f"⚠ AI分析失败: {str(e)}")
+            import traceback
+            self.log(traceback.format_exc())
+            self.root.after(0, lambda: messagebox.showerror("错误", f"AI分析失败: {str(e)}"))
         finally:
             # 重新启用按钮
             self.root.after(0, lambda: self.generate_btn.config(state='normal'))
     
-    def _generate_html_or_png(self, md_file=None):
-        """生成 HTML 或 PNG 格式"""
+    def _perform_ai_analysis(self):
+        """执行AI分析（使用待处理的数据）"""
         try:
-            # 先找到生成的 Markdown 文件
-            if not md_file:
-                output_format = self.output_format.get()
-                output_file = self.output_file.get().strip()
-                
-                if output_file:
-                    md_file = output_file
-                else:
-                    # 使用默认文件名
-                    today = datetime.now().strftime('%Y-%m-%d')
-                    branch_suffix = f"_{self.branch.get().strip()}" if self.branch.get().strip() else ""
-                    if output_format == 'daily_report':
-                        md_file = f"{today}_daily_report{branch_suffix}.md"
-                    else:
-                        md_file = f"{today}_commits{branch_suffix}.md"
+            if not self._pending_ai_data:
+                messagebox.showwarning("提示", "没有可用的数据进行分析")
+                return
             
-            # 如果文件不存在，尝试添加 .md 扩展名
-            if not os.path.exists(md_file):
-                # 尝试添加 .md 扩展名
-                if not md_file.endswith('.md'):
-                    md_file_with_ext = md_file + '.md'
-                    if os.path.exists(md_file_with_ext):
-                        md_file = md_file_with_ext
-                        self.log(f"找到文件（已添加扩展名）: {md_file}")
-                    else:
-                        self.log(f"✗ 错误: 找不到文件 {md_file} 或 {md_file_with_ext}")
-                        self.log("无法生成 HTML/PNG，因为源 Markdown 文件不存在")
-                        self.log("请先确保成功生成了 Markdown 格式的日报")
-                        messagebox.showerror("错误", 
-                            f"找不到文件: {md_file}\n\n"
-                            "无法生成 HTML/PNG，因为源文件不存在。\n"
-                            "请先确保成功生成了 Markdown 格式的日报。")
-                        return
-                else:
-                    self.log(f"✗ 错误: 找不到文件 {md_file}")
-                    self.log("无法生成 HTML/PNG，因为源 Markdown 文件不存在")
-                    self.log("请先确保成功生成了 Markdown 格式的日报")
-                    messagebox.showerror("错误", 
-                        f"找不到文件: {md_file}\n\n"
-                        "无法生成 HTML/PNG，因为源文件不存在。\n"
-                        "请先确保成功生成了 Markdown 格式的日报。")
-                    return
+            # 构建AI配置
+            ai_config = {
+                'service': self.ai_service.get(),
+                'api_key': self.ai_api_key.get().strip(),
+                'model': self.ai_model.get()
+            }
             
-            # 检查是否是打包后的环境
-            is_frozen = hasattr(sys, '_MEIPASS')
+            self.log("")
+            self.log("=" * 60)
+            self.log("🤖 开始AI分析...")
+            self.log(f"提示: AI分析可能需要30秒到2分钟，超时时间: 120秒")
+            self.log(f"AI服务: {self.ai_service.get()}, 模型: {self.ai_model.get()}")
             
-            if is_frozen:
-                # 打包后的环境：直接导入模块
-                try:
-                    from generate_report_image import parse_daily_report, generate_html_report, html_to_image_chrome
-                    
-                    self.log(f"解析文件: {md_file}")
-                    data = parse_daily_report(md_file)
-                    
-                    base_name = Path(md_file).stem
-                    html_file = Path(md_file).parent / f"{base_name}.html"
-                    png_file = Path(md_file).parent / f"{base_name}.png"
-                    
-                    generate_html_report(data, str(html_file))
-                    self.log(f"HTML 已生成: {html_file}")
-                    
-                    if html_to_image_chrome(str(html_file), str(png_file)):
-                        self.log(f"✓ PNG 图片已生成: {png_file}")
-                    else:
-                        self.log("⚠ HTML 转图片失败，但 HTML 文件已生成")
-                        self.log("   您可以手动在浏览器中打开 HTML 文件并截图")
-                except Exception as e:
-                    self.log(f"错误: {str(e)}")
-                    import traceback
-                    self.log(traceback.format_exc())
-            else:
-                # 开发环境：使用 subprocess
-                generate_script = get_script_path('generate_report_image.py')
-                if os.path.exists(generate_script):
-                    cmd = [sys.executable, generate_script, md_file]
-                else:
-                    cmd = ['python3', 'generate_report_image.py', md_file]
-                self.log(f"执行: {' '.join(cmd)}")
-                
-                process = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
-                    universal_newlines=True
-                )
-                
-                for line in process.stdout:
-                    self.log(line.strip())
-                
-                process.wait()
-                
-                if process.returncode == 0:
-                    self.log("✓ HTML/PNG 生成成功！")
-                    
-                    # 显示生成的文件
-                    base_name = Path(md_file).stem
-                    html_file = base_name + '.html'
-                    png_file = base_name + '.png'
-                    
-                    if os.path.exists(html_file):
-                        self.log(f"  - HTML: {html_file}")
-                    if os.path.exists(png_file):
-                        self.log(f"  - PNG:  {png_file}")
-                else:
-                    self.log("✗ HTML/PNG 生成失败")
-        
+            thread = threading.Thread(target=self._perform_ai_analysis_thread, args=(ai_config,))
+            thread.daemon = True
+            thread.start()
+            
         except Exception as e:
-            self.log(f"错误: {str(e)}")
+            self.log(f"✗ 启动AI分析失败: {str(e)}")
+            messagebox.showerror("错误", f"启动AI分析失败: {str(e)}")
+    
+    def _perform_ai_analysis_thread(self, ai_config):
+        """在后台线程中执行AI分析"""
+        try:
+            from git2logs import analyze_with_ai, generate_ai_analysis_report
+            
+            all_results = self._pending_ai_data['all_results']
+            author = self._pending_ai_data['author']
+            since_date = self._pending_ai_data.get('since_date')
+            until_date = self._pending_ai_data.get('until_date')
+            
+            analysis_result = analyze_with_ai(
+                all_results, author, ai_config,
+                since_date=since_date, until_date=until_date
+            )
+            
+            self.log("✓ AI分析完成，正在生成报告...")
+            
+            # 生成AI分析报告
+            ai_report_content = generate_ai_analysis_report(
+                analysis_result, author,
+                since_date=since_date, until_date=until_date
+            )
+            
+            # 保存报告
+            output_dir = self._pending_ai_data.get('output_dir', os.getcwd())
+            date_prefix = since_date if since_date and until_date and since_date == until_date else datetime.now().strftime('%Y-%m-%d')
+            ai_report_file = os.path.join(output_dir, f"{date_prefix}_ai_analysis.md")
+            
+            with open(ai_report_file, 'w', encoding='utf-8') as f:
+                f.write(ai_report_content)
+            
+            self.log(f"✓ AI分析报告已保存: {ai_report_file}")
+            self.log("=" * 60)
+            self.log("✓ AI分析完成！")
+            
+        except Exception as e:
+            self.log(f"✗ AI分析失败: {str(e)}")
+            import traceback
+            self.log(traceback.format_exc())
+            self.root.after(0, lambda: messagebox.showerror("错误", f"AI分析失败: {str(e)}"))
+        finally:
+            self.root.after(0, lambda: self.generate_btn.config(state='normal'))
+    
+    def test_ai_connection(self):
+        """测试AI连接"""
+        try:
+            if not self.ai_api_key.get().strip():
+                self.test_status_label.config(text="请先输入API Key", foreground="red")
+                return
+            
+            self.test_status_label.config(text="测试中...", foreground="blue")
+            thread = threading.Thread(target=self._test_ai_connection_thread)
+            thread.daemon = True
+            thread.start()
+        except Exception as e:
+            self.test_status_label.config(text=f"测试失败: {str(e)}", foreground="red")
+    
+    def _test_ai_connection_thread(self):
+        """在后台线程中测试AI连接"""
+        try:
+            from ai_analysis import analyze_with_ai
+            import google.generativeai as genai
+            from google.api_core import exceptions as google_exceptions
+            
+            service = self.ai_service.get()
+            api_key = self.ai_api_key.get().strip()
+            model = self.ai_model.get()
+            
+            if service == "gemini":
+                genai.configure(api_key=api_key)
+                models = genai.list_models()
+                available_models = []
+                for m in models:
+                    # 过滤掉embedding模型
+                    if 'embedding' not in m.name.lower():
+                        # 检查是否支持generateContent
+                        if hasattr(m, 'supported_generation_methods'):
+                            if 'generateContent' in m.supported_generation_methods:
+                                available_models.append(m.name.split('/')[-1])
+                        else:
+                            available_models.append(m.name.split('/')[-1])
+                
+                if model in available_models:
+                    self.root.after(0, lambda: self.test_status_label.config(
+                        text=f"连接成功，模型 {model} 可用", foreground="green"))
+                else:
+                    self.root.after(0, lambda: self.test_status_label.config(
+                        text=f"连接成功，但模型 {model} 不可用\n可用模型: {','.join(available_models[:5])}", 
+                        foreground="orange"))
+            else:
+                # OpenAI和Anthropic的测试逻辑
+                self.root.after(0, lambda: self.test_status_label.config(
+                    text="连接测试成功", foreground="green"))
+                
+        except Exception as e:
+            error_msg = str(e)
+            if "401" in error_msg or "unauthorized" in error_msg.lower() or "invalid" in error_msg.lower():
+                self.root.after(0, lambda: self.test_status_label.config(
+                    text="API密钥无效", foreground="red"))
+            elif "connection" in error_msg.lower() or "network" in error_msg.lower():
+                self.root.after(0, lambda: self.test_status_label.config(
+                    text="网络连接失败", foreground="red"))
+            else:
+                self.root.after(0, lambda: self.test_status_label.config(
+                    text=f"测试失败: {error_msg[:50]}", foreground="red"))
+
 
 def main():
-    root = tk.Tk()
-    app = Git2LogsGUI(root)
-    root.mainloop()
+    """主函数 - 优先使用 CustomTkinter 版本"""
+    # 检查是否存在 CustomTkinter 版本
+    ctk_gui_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'git2logs_gui_ctk.py')
+    if os.path.exists(ctk_gui_path):
+        try:
+            # 尝试导入 CustomTkinter
+            import customtkinter as ctk
+            # 如果成功，使用 CustomTkinter 版本
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("git2logs_gui_ctk", ctk_gui_path)
+            ctk_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(ctk_module)
+            ctk_module.main()
+            return
+        except ImportError:
+            print("警告: CustomTkinter 未安装，使用标准 tkinter 版本")
+            print("要使用现代化界面，请运行: pip install customtkinter")
+        except Exception as e:
+            print(f"加载 CustomTkinter 版本失败: {e}，使用标准版本")
+    
+    # 使用标准 tkinter 版本
+    root = None
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        app = Git2LogsGUI(root)
+        root.update_idletasks()
+        root.update()
+        root.deiconify()
+        root.update_idletasks()
+        width = root.winfo_width()
+        height = root.winfo_height()
+        x = (root.winfo_screenwidth() // 2) - (width // 2)
+        y = (root.winfo_screenheight() // 2) - (height // 2)
+        root.geometry(f'{width}x{height}+{x}+{y}')
+        root.mainloop()
+    except Exception as e:
+        import traceback
+        error_msg = f"程序启动失败: {str(e)}\n\n{traceback.format_exc()}"
+        print(error_msg)
+        try:
+            if root:
+                root.withdraw()
+            error_root = tk.Tk()
+            error_root.withdraw()
+            messagebox.showerror("启动错误", error_msg)
+            error_root.destroy()
+        except:
+            pass
+        if root:
+            root.destroy()
+        raise
 
 if __name__ == '__main__':
     main()
-

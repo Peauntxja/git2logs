@@ -16,6 +16,13 @@
 pip install -r requirements.txt
 ```
 
+**注意：** 要使用现代化 CustomTkinter 界面，需要安装 `customtkinter`：
+```bash
+pip install customtkinter
+```
+
+如果未安装 CustomTkinter，程序会自动使用标准 tkinter 界面（功能完全相同）。
+
 ## 快速开始
 
 ### 图形界面版本（推荐）
@@ -27,11 +34,15 @@ python3 git2logs_gui.py
 ```
 
 **功能特点：**
-- 可视化参数输入（GitLab URL、仓库地址、令牌等）
-- 日期选择（今天或指定日期范围）
-- 输出格式选择（Markdown/开发日报/HTML/PNG）
-- 实时执行日志显示
-- 一键生成所有格式
+- 🎨 **现代化 CustomTkinter 暗黑主题界面**（自动检测，如果未安装 CustomTkinter 则使用标准界面）
+- 📊 **代码统计和多维度评分**：自动计算代码行数、提交频率、活跃度等多维度指标
+- 🤖 **AI 智能分析**：支持 OpenAI、Anthropic Claude、Google Gemini 对提交记录进行深度分析
+- 📝 可视化参数输入（GitLab URL、仓库地址、令牌等）
+- 📅 日期选择（今天或指定日期范围）
+- 📄 输出格式选择（Markdown/开发日报/统计报告/HTML/PNG）
+- 📋 实时执行日志显示（带颜色前缀）
+- 🚀 一键生成所有格式
+- 🔄 优化的滚动性能，流畅无卡顿
 
 ### 命令行版本
 

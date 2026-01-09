@@ -378,7 +378,7 @@ def scan_all_projects(gl, author_name, since_date=None, until_date=None, branch=
     return results
 
 
-def generate_markdown_log(grouped_commits, author_name, repo_name=None):
+def generate_markdown_log(grouped_commits, author_name, repo_name=None, project=None):
     """
     生成 Markdown 格式的日志
     
@@ -386,6 +386,7 @@ def generate_markdown_log(grouped_commits, author_name, repo_name=None):
         grouped_commits: 按日期分组的提交字典
         author_name: 提交者姓名
         repo_name: 仓库名称（可选）
+        project: GitLab 项目对象（可选，用于获取详细commit信息）
     
     Returns:
         str: Markdown 格式的日志内容
@@ -416,11 +417,30 @@ def generate_markdown_log(grouped_commits, author_name, repo_name=None):
         
         # 提交列表
         for idx, commit in enumerate(commits, 1):
-            # 提交信息
-            commit_id = commit.id[:8]  # 短提交 ID
-            commit_message = commit.message.split('\n')[0]  # 第一行提交信息
+            # 获取详细commit信息
+            if project:
+                try:
+                    details = get_commit_details(project, commit)
+                    short_message = details['short_message']
+                    full_message = details['full_message']
+                    stats = details['stats']
+                    changed_files = details['changed_files']
+                except Exception as e:
+                    logger.debug(f"获取commit详情失败: {str(e)}")
+                    short_message = commit.message.split('\n')[0] if commit.message else ''
+                    full_message = commit.message or ''
+                    stats = None
+                    changed_files = []
+            else:
+                short_message = commit.message.split('\n')[0] if commit.message else ''
+                full_message = commit.message or ''
+                stats = None
+                changed_files = []
             
-            lines.append(f"### {idx}. [{commit_id}]({commit.web_url}) {commit_message}\n")
+            commit_id = commit.id[:8]  # 短提交 ID
+            commit_url = getattr(commit, 'web_url', '')
+            
+            lines.append(f"### {idx}. [{commit_id}]({commit_url}) {short_message}\n")
             
             # 提交时间
             commit_time = commit.committed_date
@@ -431,15 +451,30 @@ def generate_markdown_log(grouped_commits, author_name, repo_name=None):
             time_str = time_obj.strftime('%H:%M:%S')
             lines.append(f"**时间**: {time_str}\n")
             
-            # 如果有文件变更统计
-            try:
-                commit_detail = commit
-                if hasattr(commit_detail, 'stats'):
-                    stats = commit_detail.stats
-                    if stats:
-                        lines.append(f"**变更**: +{stats.get('additions', 0)} -{stats.get('deletions', 0)}\n")
-            except:
-                pass
+            # 显示完整的commit message（如果有多行）
+            if full_message and '\n' in full_message:
+                lines.append(f"**完整提交信息**:\n```\n{full_message}\n```\n")
+            
+            # 显示代码行数统计
+            if stats:
+                lines.append(f"**代码变更**: +{stats.get('additions', 0)} -{stats.get('deletions', 0)} (总计: {stats.get('total', 0)} 行)\n")
+            elif hasattr(commit, 'stats') and commit.stats:
+                try:
+                    commit_stats = commit.stats
+                    if isinstance(commit_stats, dict):
+                        lines.append(f"**代码变更**: +{commit_stats.get('additions', 0)} -{commit_stats.get('deletions', 0)}\n")
+                except:
+                    pass
+            
+            # 显示文件变更列表
+            if changed_files:
+                lines.append(f"**变更文件** ({len(changed_files)} 个):\n")
+                for file_info in changed_files[:10]:  # 最多显示10个文件
+                    file_path = file_info.get('new_path') or file_info.get('old_path') or file_info.get('path', '')
+                    if file_path:
+                        lines.append(f"- `{file_path}`\n")
+                if len(changed_files) > 10:
+                    lines.append(f"- ... 还有 {len(changed_files) - 10} 个文件\n")
             
             lines.append("\n")
         
@@ -528,11 +563,28 @@ def generate_multi_project_markdown(all_results, author_name, since_date=None, u
             # 按时间排序
             project_commits.sort(key=lambda c: c.committed_date, reverse=True)
             
+            # 获取项目对象用于获取详细commit信息
+            project = all_results[project_path]['project']
+            
             for idx, commit in enumerate(project_commits, 1):
-                commit_id = commit.id[:8]
-                commit_message = commit.message.split('\n')[0]
+                # 获取详细commit信息
+                try:
+                    details = get_commit_details(project, commit)
+                    short_message = details['short_message']
+                    full_message = details['full_message']
+                    stats = details['stats']
+                    changed_files = details['changed_files']
+                except Exception as e:
+                    logger.debug(f"获取commit详情失败: {str(e)}")
+                    short_message = commit.message.split('\n')[0] if commit.message else ''
+                    full_message = commit.message or ''
+                    stats = None
+                    changed_files = []
                 
-                lines.append(f"#### {idx}. [{commit_id}]({commit.web_url}) {commit_message}\n")
+                commit_id = commit.id[:8]
+                commit_url = getattr(commit, 'web_url', '')
+                
+                lines.append(f"#### {idx}. [{commit_id}]({commit_url}) {short_message}\n")
                 
                 commit_time = commit.committed_date
                 if isinstance(commit_time, str):
@@ -540,7 +592,34 @@ def generate_multi_project_markdown(all_results, author_name, since_date=None, u
                 else:
                     time_obj = commit_time
                 time_str = time_obj.strftime('%H:%M:%S')
-                lines.append(f"**时间**: {time_str}\n\n")
+                lines.append(f"**时间**: {time_str}\n")
+                
+                # 显示完整的commit message（如果有多行）
+                if full_message and '\n' in full_message:
+                    lines.append(f"**完整提交信息**:\n```\n{full_message}\n```\n")
+                
+                # 显示代码行数统计
+                if stats:
+                    lines.append(f"**代码变更**: +{stats.get('additions', 0)} -{stats.get('deletions', 0)} (总计: {stats.get('total', 0)} 行)\n")
+                elif hasattr(commit, 'stats') and commit.stats:
+                    try:
+                        commit_stats = commit.stats
+                        if isinstance(commit_stats, dict):
+                            lines.append(f"**代码变更**: +{commit_stats.get('additions', 0)} -{commit_stats.get('deletions', 0)}\n")
+                    except:
+                        pass
+                
+                # 显示文件变更列表（最多显示5个）
+                if changed_files:
+                    lines.append(f"**变更文件** ({len(changed_files)} 个):\n")
+                    for file_info in changed_files[:5]:
+                        file_path = file_info.get('new_path') or file_info.get('old_path') or file_info.get('path', '')
+                        if file_path:
+                            lines.append(f"- `{file_path}`\n")
+                    if len(changed_files) > 5:
+                        lines.append(f"- ... 还有 {len(changed_files) - 5} 个文件\n")
+                
+                lines.append("\n")
             
             lines.append("---\n\n")
     
@@ -583,6 +662,136 @@ def analyze_commit_type(commit_message):
         return ('代码重构', '♻️')
     else:
         return ('其他', '📌')
+
+
+def get_commit_details(project, commit, timeout=10, max_files=50, max_message_length=5000):
+    """
+    获取单个提交的详细信息（带超时和异常处理）
+    
+    Args:
+        project: GitLab 项目对象
+        commit: GitLab commit 对象
+        timeout: 超时时间（秒），默认10秒
+        max_files: 最大文件数量，默认50个
+        max_message_length: 最大消息长度，默认5000字符
+    
+    Returns:
+        dict: 包含完整信息的字典
+            - full_message: 完整的commit message（多行，已截断）
+            - short_message: 第一行commit message
+            - changed_files: 文件变更列表（已限制数量）
+            - stats: 代码行数统计
+            - author: 作者信息
+            - committed_date: 提交时间
+    """
+    import signal
+    
+    # 限制commit message长度
+    full_message = commit.message or ''
+    if len(full_message) > max_message_length:
+        full_message = full_message[:max_message_length] + '\n... (消息过长，已截断)'
+        logger.debug(f"Commit {commit.id[:8]} 消息过长，已截断至 {max_message_length} 字符")
+    
+    details = {
+        'full_message': full_message,
+        'short_message': full_message.split('\n')[0] if full_message else '',
+        'changed_files': [],
+        'stats': None,
+        'author': getattr(commit, 'author_name', ''),
+        'committed_date': commit.committed_date,
+        'web_url': getattr(commit, 'web_url', '')
+    }
+    
+    # 超时处理函数
+    def timeout_handler(signum, frame):
+        raise TimeoutError(f"获取commit详情超时（{timeout}秒）")
+    
+    try:
+        # 设置超时（仅Unix系统）
+        if hasattr(signal, 'SIGALRM'):
+            signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(timeout)
+        
+        try:
+            # 尝试获取详细的commit信息
+            detailed_commit = project.commits.get(commit.id)
+            
+            # 获取文件变更列表（限制数量和大小）
+            try:
+                if hasattr(detailed_commit, 'diff'):
+                    diffs = detailed_commit.diff()
+                    file_count = 0
+                    for diff in diffs:
+                        if file_count >= max_files:
+                            logger.debug(f"Commit {commit.id[:8]} 文件数量超过限制，仅显示前 {max_files} 个")
+                            break
+                        
+                        try:
+                            diff_text = getattr(diff, 'diff', '')
+                            # 限制单个diff的大小
+                            if diff_text and len(diff_text) > 10000:
+                                diff_text = diff_text[:10000] + '\n... (diff过长，已截断)'
+                            
+                            file_info = {
+                                'path': getattr(diff, 'new_path', getattr(diff, 'old_path', '')),
+                                'old_path': getattr(diff, 'old_path', ''),
+                                'new_path': getattr(diff, 'new_path', ''),
+                                'diff': diff_text[:500] if diff_text else ''  # 限制显示长度
+                            }
+                            details['changed_files'].append(file_info)
+                            file_count += 1
+                        except Exception as e:
+                            logger.debug(f"处理单个文件diff失败: {str(e)}")
+                            continue
+                    
+                    if len(diffs) > max_files:
+                        details['changed_files'].append({
+                            'path': f'... 还有 {len(diffs) - max_files} 个文件未显示',
+                            'old_path': '',
+                            'new_path': '',
+                            'diff': ''
+                        })
+            except TimeoutError:
+                logger.warning(f"获取commit {commit.id[:8]} 文件变更列表超时")
+            except Exception as e:
+                logger.debug(f"获取文件变更列表失败: {str(e)}")
+            
+            # 获取统计信息
+            try:
+                if hasattr(detailed_commit, 'stats') and detailed_commit.stats:
+                    stats = detailed_commit.stats
+                    if isinstance(stats, dict):
+                        details['stats'] = {
+                            'additions': stats.get('additions', 0),
+                            'deletions': stats.get('deletions', 0),
+                            'total': stats.get('total', 0)
+                        }
+            except Exception as e:
+                logger.debug(f"获取统计信息失败: {str(e)}")
+        
+        finally:
+            # 取消超时
+            if hasattr(signal, 'SIGALRM'):
+                signal.alarm(0)
+    
+    except TimeoutError as e:
+        logger.warning(f"获取commit {commit.id[:8]} 详情超时: {str(e)}")
+    except Exception as e:
+        logger.debug(f"获取详细commit信息失败: {str(e)}")
+        # 降级：使用基本信息
+        try:
+            if hasattr(commit, 'stats') and commit.stats:
+                stats = commit.stats
+                if isinstance(stats, dict):
+                    details['stats'] = {
+                        'additions': stats.get('additions', 0),
+                        'deletions': stats.get('deletions', 0),
+                        'total': stats.get('total', 0)
+                    }
+        except:
+            pass
+    
+    return details
 
 
 def get_commit_stats(project, commit):
@@ -872,6 +1081,151 @@ def calculate_scores(all_results, since_date=None, until_date=None):
     overall_score = (diligence_score + stability_score + problem_solving_score + 
                      feature_score + versatility_score) / 5
     
+    # 生成详细分析文本
+    def generate_analysis_text():
+        analysis = {}
+        
+        # 代码质量评估（基于提交频率、稳定性、代码行数等）
+        code_quality_score = (diligence_score * 0.3 + stability_score * 0.3 + 
+                             min(100, actual_frequency * 20) * 0.2 + 
+                             min(100, project_count * 10) * 0.2)
+        code_quality_analysis = f"基于提交频率({actual_frequency:.2f}次/天)、活跃天数({active_days}天)和项目参与度({project_count}个项目)的综合评估。"
+        if actual_frequency > 2:
+            code_quality_analysis += "提交频率较高，显示出良好的开发习惯。"
+        if active_days / total_days > 0.5:
+            code_quality_analysis += "活跃天数占比高，工作持续性良好。"
+        
+        analysis['code_quality'] = {
+            'score': round(code_quality_score, 2),
+            'analysis': code_quality_analysis,
+            'strengths': [
+                f"活跃天数: {active_days} 天" if active_days > 0 else "需要提高活跃度",
+                f"提交频率: {actual_frequency:.2f} 次/天" if actual_frequency > 0 else "提交频率较低",
+                f"涉及项目: {project_count} 个" if project_count > 0 else "项目参与度较低"
+            ],
+            'improvements': [
+                "建议保持稳定的提交频率" if actual_frequency < 1 else "提交频率良好",
+                "建议提高代码提交的持续性" if active_days / total_days < 0.3 else "工作持续性良好"
+            ]
+        }
+        
+        # 工作模式分析
+        work_pattern_analysis = f"工作模式分析：活跃天数占比 {active_days/total_days*100:.1f}%，"
+        if len(monthly_commits) > 0:
+            work_pattern_analysis += f"涉及 {len(monthly_commits)} 个月，平均每月 {mean_commits:.1f} 次提交。"
+        if cv < 0.5:
+            work_pattern_analysis += "提交分布非常均匀，工作节奏稳定。"
+        elif cv < 1.0:
+            work_pattern_analysis += "提交分布较为均匀，工作节奏较稳定。"
+        else:
+            work_pattern_analysis += "提交分布波动较大，建议保持更稳定的工作节奏。"
+        
+        analysis['work_pattern'] = {
+            'score': round(stability_score, 2),
+            'analysis': work_pattern_analysis,
+            'strengths': [
+                f"稳定性系数: {cv:.3f}" if cv > 0 else "提交非常稳定",
+                f"月度分布: {len(monthly_commits)} 个月有提交" if len(monthly_commits) > 0 else "需要提高月度分布"
+            ],
+            'improvements': [
+                "建议保持每月都有提交记录" if len(monthly_commits) < 3 else "月度分布良好",
+                "建议减少提交数量的波动" if cv > 1.0 else "提交分布稳定"
+            ]
+        }
+        
+        # 技术栈评估（基于项目数量和提交类型）
+        tech_stack_analysis = f"技术栈评估：参与 {project_count} 个项目，"
+        if project_count > 5:
+            tech_stack_analysis += "项目参与度高，显示出良好的多项目协作能力。"
+        elif project_count > 2:
+            tech_stack_analysis += "项目参与度中等，建议扩展项目范围。"
+        else:
+            tech_stack_analysis += "项目参与度较低，建议增加项目参与。"
+        
+        analysis['tech_stack'] = {
+            'score': round(min(100, project_count * 15 + min(50, time_span_days / 365 * 50)), 2),
+            'analysis': tech_stack_analysis,
+            'strengths': [
+                f"项目数量: {project_count} 个",
+                f"时间跨度: {time_span_days} 天"
+            ],
+            'improvements': [
+                "建议参与更多不同类型的项目" if project_count < 3 else "项目参与度良好",
+                "建议保持长期的项目参与" if time_span_days < 90 else "项目参与时间充足"
+            ]
+        }
+        
+        # 问题解决能力
+        problem_solving_analysis = f"问题解决能力：修复类提交占比 {fix_commits/total_commits*100:.1f}% ({fix_commits}/{total_commits})。"
+        if fix_commits / total_commits > 0.3:
+            problem_solving_analysis += "修复类提交占比较高，显示出良好的问题解决能力。"
+        elif fix_commits / total_commits > 0.1:
+            problem_solving_analysis += "修复类提交占比中等，问题解决能力良好。"
+        else:
+            problem_solving_analysis += "修复类提交占比较低，建议提高问题解决能力。"
+        
+        analysis['problem_solving'] = {
+            'score': round(problem_solving_score, 2),
+            'analysis': problem_solving_analysis,
+            'strengths': [
+                f"修复类提交: {fix_commits} 次",
+                f"修复占比: {fix_commits/total_commits*100:.1f}%" if total_commits > 0 else "无修复记录"
+            ],
+            'improvements': [
+                "建议提高bug修复的及时性" if fix_commits / total_commits < 0.1 else "问题解决能力良好",
+                "建议记录更详细的修复信息" if fix_commits > 0 else "建议增加问题修复的提交"
+            ]
+        }
+        
+        # 创新性分析
+        innovation_analysis = f"创新性分析：功能开发类提交占比 {feat_commits/total_commits*100:.1f}% ({feat_commits}/{total_commits})。"
+        if feat_commits / total_commits > 0.4:
+            innovation_analysis += "功能开发类提交占比较高，显示出良好的创新能力和功能开发能力。"
+        elif feat_commits / total_commits > 0.2:
+            innovation_analysis += "功能开发类提交占比中等，创新能力良好。"
+        else:
+            innovation_analysis += "功能开发类提交占比较低，建议增加新功能开发。"
+        
+        analysis['innovation'] = {
+            'score': round(feature_score, 2),
+            'analysis': innovation_analysis,
+            'strengths': [
+                f"功能开发提交: {feat_commits} 次",
+                f"功能占比: {feat_commits/total_commits*100:.1f}%" if total_commits > 0 else "无功能开发记录"
+            ],
+            'improvements': [
+                "建议增加新功能的开发" if feat_commits / total_commits < 0.2 else "功能开发能力良好",
+                "建议记录更详细的功能开发信息" if feat_commits > 0 else "建议增加功能开发的提交"
+            ]
+        }
+        
+        # 团队协作
+        collaboration_analysis = f"团队协作：同时维护 {project_count} 个项目，时间跨度 {time_span_days} 天。"
+        if project_count > 3 and time_span_days > 180:
+            collaboration_analysis += "多项目协作能力强，能够同时维护多个项目并保持长期参与。"
+        elif project_count > 1:
+            collaboration_analysis += "具备多项目协作能力，建议保持长期参与。"
+        else:
+            collaboration_analysis += "建议增加项目参与，提高团队协作能力。"
+        
+        analysis['collaboration'] = {
+            'score': round(versatility_score, 2),
+            'analysis': collaboration_analysis,
+            'strengths': [
+                f"项目数量: {project_count} 个",
+                f"时间跨度: {time_span_days} 天",
+                f"活跃天数: {active_days} 天"
+            ],
+            'improvements': [
+                "建议参与更多项目" if project_count < 2 else "项目参与度良好",
+                "建议保持长期的项目参与" if time_span_days < 90 else "项目参与时间充足"
+            ]
+        }
+        
+        return analysis
+    
+    detailed_analysis = generate_analysis_text()
+    
     return {
         'diligence': {
             'score': round(diligence_score, 2),
@@ -902,7 +1256,8 @@ def calculate_scores(all_results, since_date=None, until_date=None):
             'project_count': project_count,
             'time_span_days': time_span_days
         },
-        'overall': round(overall_score, 2)
+        'overall': round(overall_score, 2),
+        'detailed_analysis': detailed_analysis  # 新增详细分析
     }
 
 
@@ -1043,6 +1398,492 @@ def generate_statistics_report(all_results, author_name, since_date=None, until_
     return ''.join(lines)
 
 
+def generate_all_reports(all_results, author_name, output_dir, since_date=None, until_date=None, 
+                         generate_statistics=True, generate_daily=True, generate_html=True, 
+                         generate_png=True, logger_func=None):
+    """
+    批量生成所有格式的报告
+    
+    Args:
+        all_results: 按项目分组的提交字典
+        author_name: 提交者姓名
+        output_dir: 输出目录
+        since_date: 起始日期（可选）
+        until_date: 结束日期（可选）
+        generate_statistics: 是否生成统计报告
+        generate_daily: 是否生成开发日报
+        generate_html: 是否生成HTML格式
+        generate_png: 是否生成PNG图片
+        logger_func: 日志输出函数（可选）
+    
+    Returns:
+        dict: 生成的文件路径字典
+    """
+    import os
+    from pathlib import Path
+    from datetime import datetime
+    
+    if logger_func:
+        log = logger_func
+    else:
+        log = logger.info
+    
+    # 确保输出目录存在
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    
+    # 确定文件前缀
+    if since_date and until_date and since_date == until_date:
+        date_prefix = since_date
+    else:
+        date_prefix = datetime.now().strftime('%Y-%m-%d')
+    
+    generated_files = {}
+    
+    # 1. 生成统计报告
+    if generate_statistics:
+        try:
+            log("正在生成统计报告...")
+            stats_content = generate_statistics_report(
+                all_results, author_name, since_date, until_date
+            )
+            stats_file = output_path / f"{date_prefix}_statistics.md"
+            with open(stats_file, 'w', encoding='utf-8') as f:
+                f.write(stats_content)
+            generated_files['statistics'] = str(stats_file)
+            log(f"✓ 统计报告已保存: {stats_file}")
+        except Exception as e:
+            log(f"✗ 生成统计报告失败: {str(e)}")
+            generated_files['statistics'] = None
+    
+    # 2. 生成开发日报
+    daily_file = None
+    if generate_daily:
+        try:
+            log("正在生成开发日报...")
+            daily_content = generate_daily_report(
+                all_results, author_name, since_date, until_date
+            )
+            daily_file = output_path / f"{date_prefix}_daily_report.md"
+            with open(daily_file, 'w', encoding='utf-8') as f:
+                f.write(daily_content)
+            generated_files['daily_report'] = str(daily_file)
+            log(f"✓ 开发日报已保存: {daily_file}")
+        except Exception as e:
+            log(f"✗ 生成开发日报失败: {str(e)}")
+            generated_files['daily_report'] = None
+    
+    # 3. 生成HTML格式（需要基于日报）
+    html_file = None
+    if generate_html and daily_file and daily_file.exists():
+        try:
+            log("正在生成HTML格式...")
+            # 尝试导入 generate_report_image 模块
+            try:
+                from generate_report_image import parse_daily_report, generate_html_report
+                data = parse_daily_report(str(daily_file))
+                html_file = output_path / f"{date_prefix}_daily_report.html"
+                generate_html_report(data, str(html_file))
+                generated_files['html'] = str(html_file)
+                log(f"✓ HTML文件已保存: {html_file}")
+            except ImportError:
+                log("⚠ 无法导入 generate_report_image 模块，跳过HTML生成")
+                generated_files['html'] = None
+            except Exception as e:
+                log(f"✗ 生成HTML失败: {str(e)}")
+                generated_files['html'] = None
+        except Exception as e:
+            log(f"✗ 生成HTML失败: {str(e)}")
+            generated_files['html'] = None
+    
+    # 4. 生成PNG图片（需要基于HTML）
+    if generate_png and html_file and html_file.exists():
+        try:
+            log("正在生成PNG图片...")
+            try:
+                from generate_report_image import html_to_image_chrome
+                png_file = output_path / f"{date_prefix}_daily_report.png"
+                if html_to_image_chrome(str(html_file), str(png_file)):
+                    generated_files['png'] = str(png_file)
+                    log(f"✓ PNG图片已保存: {png_file}")
+                else:
+                    log("⚠ PNG图片生成失败（可能需要Chrome浏览器）")
+                    generated_files['png'] = None
+            except ImportError:
+                log("⚠ 无法导入 generate_report_image 模块，跳过PNG生成")
+                generated_files['png'] = None
+            except Exception as e:
+                log(f"✗ 生成PNG失败: {str(e)}")
+                generated_files['png'] = None
+        except Exception as e:
+            log(f"✗ 生成PNG失败: {str(e)}")
+            generated_files['png'] = None
+    
+    log(f"批量生成完成！共生成 {len([f for f in generated_files.values() if f])} 个文件")
+    return generated_files
+
+
+def analyze_with_ai(all_results, author_name, ai_config, since_date=None, until_date=None):
+    """
+    收集提交数据并使用AI进行分析
+    
+    Args:
+        all_results: 按项目分组的提交字典
+        author_name: 提交者姓名
+        ai_config: AI配置字典
+            - service: 'openai', 'anthropic' 或 'gemini'
+            - api_key: API密钥
+            - model: 模型名称（可选）
+        since_date: 起始日期（可选）
+        until_date: 结束日期（可选）
+    
+    Returns:
+        dict: AI分析结果
+    """
+    # 确保 datetime 已导入（避免作用域问题）
+    from datetime import datetime
+    
+    try:
+        from ai_analysis import analyze_with_ai as call_ai_service
+    except ImportError:
+        logger.error("无法导入 ai_analysis 模块")
+        raise
+    
+    # 收集提交数据
+    commits_data = {
+        'total_commits': 0,
+        'active_days': 0,
+        'projects': [],
+        'commit_messages': [],
+        'time_distribution': {},
+        'code_stats': {}
+    }
+    
+    all_dates = set()
+    all_commit_messages = []
+    projects_set = set()
+    
+    # 计算代码统计
+    try:
+        code_stats = calculate_code_statistics(all_results, since_date, until_date)
+        commits_data['code_stats'] = code_stats
+    except Exception as e:
+        logger.warning(f"计算代码统计失败: {str(e)}")
+        commits_data['code_stats'] = {
+            'total_additions': 0,
+            'total_deletions': 0
+        }
+    
+    # 收集提交信息
+    for project_path, result in all_results.items():
+        projects_set.add(project_path)
+        commits = result['commits']
+        commits_data['total_commits'] += len(commits)
+        
+        for commit in commits:
+            # 收集commit message
+            if commit.message:
+                all_commit_messages.append(commit.message[:200])  # 限制长度
+            
+            # 收集日期
+            commit_date = commit.committed_date
+            if isinstance(commit_date, str):
+                date_obj = datetime.fromisoformat(commit_date.replace('Z', '+00:00'))
+            else:
+                date_obj = commit_date
+            date_str = date_obj.strftime('%Y-%m-%d')
+            all_dates.add(date_str)
+            
+            # 收集时间分布（按月）
+            month_key = date_obj.strftime('%Y-%m')
+            commits_data['time_distribution'][month_key] = commits_data['time_distribution'].get(month_key, 0) + 1
+    
+    commits_data['active_days'] = len(all_dates)
+    commits_data['projects'] = list(projects_set)
+    commits_data['commit_messages'] = all_commit_messages[:50]  # 最多50条
+    
+    # 调用AI分析（带超时）
+    timeout = 120  # 默认120秒超时
+    logger.info(f"正在调用AI服务进行分析（超时时间: {timeout}秒）...")
+    try:
+        analysis_result = call_ai_service(commits_data, ai_config, timeout=timeout)
+        logger.info("AI分析完成")
+        # 在结果中添加AI服务信息
+        analysis_result['ai_service'] = ai_config.get('service', 'unknown')
+        analysis_result['ai_model'] = ai_config.get('model', 'unknown')
+        return analysis_result
+    except TimeoutError as e:
+        logger.error(f"AI分析超时: {str(e)}")
+        raise
+    except ValueError as e:
+        # API密钥错误等
+        logger.error(f"AI分析失败（可能是API密钥问题）: {str(e)}")
+        raise
+    except ConnectionError as e:
+        # 网络错误
+        logger.error(f"AI分析失败（网络连接问题）: {str(e)}")
+        raise
+    except Exception as e:
+        logger.error(f"AI分析失败: {str(e)}")
+        raise
+
+
+def generate_local_analysis_report(all_results, author_name, since_date=None, until_date=None):
+    """
+    使用本地评价逻辑生成分析报告（当没有AI密钥时使用）
+    
+    Args:
+        all_results: 按项目分组的提交字典
+        author_name: 提交者姓名
+        since_date: 起始日期（可选）
+        until_date: 结束日期（可选）
+    
+    Returns:
+        str: Markdown格式的本地分析报告
+    """
+    lines = []
+    
+    # 标题
+    lines.append(f"# {author_name} - 本地智能分析报告\n")
+    lines.append(f"**生成时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+    lines.append(f"**提交者**: {author_name}\n")
+    lines.append(f"**分析方式**: 📊 本地评价逻辑（基于统计数据和规则算法，无需AI服务）\n")
+    
+    if since_date and until_date:
+        lines.append(f"**分析时间范围**: {since_date} 至 {until_date}\n")
+    elif since_date:
+        lines.append(f"**起始日期**: {since_date}\n")
+    elif until_date:
+        lines.append(f"**结束日期**: {until_date}\n")
+    
+    lines.append("\n---\n\n")
+    
+    # 计算评分和详细分析
+    try:
+        scores = calculate_scores(all_results, since_date, until_date)
+        detailed_analysis = scores.get('detailed_analysis', {})
+        
+        # 执行摘要
+        lines.append("## 📋 执行摘要\n\n")
+        overall_score = scores.get('overall', 0)
+        lines.append(f"**总体评分**: {overall_score:.1f} / 100\n\n")
+        lines.append("**各维度评分**:\n")
+        
+        dimension_map = {
+            'code_quality': '代码质量',
+            'work_pattern': '工作模式',
+            'tech_stack': '技术栈',
+            'problem_solving': '问题解决能力',
+            'innovation': '创新性',
+            'collaboration': '团队协作'
+        }
+        
+        for dim_key, dim_name in dimension_map.items():
+            if dim_key in detailed_analysis:
+                score = detailed_analysis[dim_key].get('score', 0)
+                lines.append(f"- {dim_name}: {score:.1f} / 100\n")
+        
+        lines.append("\n---\n\n")
+        
+        # 详细分析
+        lines.append("## 🔍 详细分析\n\n")
+        
+        for dim_key, dim_name in dimension_map.items():
+            if dim_key in detailed_analysis:
+                dim_data = detailed_analysis[dim_key]
+                score = dim_data.get('score', 0)
+                
+                lines.append(f"### {dim_name}: {score:.1f} / 100\n\n")
+                
+                # 详细分析
+                if 'analysis' in dim_data:
+                    lines.append(f"**分析**:\n{dim_data['analysis']}\n\n")
+                
+                # 优势
+                if 'strengths' in dim_data and dim_data['strengths']:
+                    lines.append("**优势**:\n")
+                    if isinstance(dim_data['strengths'], list):
+                        for strength in dim_data['strengths']:
+                            lines.append(f"- {strength}\n")
+                    else:
+                        lines.append(f"- {dim_data['strengths']}\n")
+                    lines.append("\n")
+                
+                # 改进建议
+                if 'improvements' in dim_data and dim_data['improvements']:
+                    lines.append("**改进建议**:\n")
+                    if isinstance(dim_data['improvements'], list):
+                        for improvement in dim_data['improvements']:
+                            lines.append(f"- {improvement}\n")
+                    else:
+                        lines.append(f"- {dim_data['improvements']}\n")
+                    lines.append("\n")
+                
+                lines.append("---\n\n")
+        
+        # 原始评分数据
+        lines.append("## 📊 原始评分数据\n\n")
+        lines.append(f"- **勤奋度**: {scores.get('diligence', {}).get('score', 0):.1f} / 100\n")
+        lines.append(f"- **稳定性**: {scores.get('stability', {}).get('score', 0):.1f} / 100\n")
+        lines.append(f"- **问题解决能力**: {scores.get('problem_solving', {}).get('score', 0):.1f} / 100\n")
+        lines.append(f"- **功能创新力**: {scores.get('feature_innovation', {}).get('score', 0):.1f} / 100\n")
+        lines.append(f"- **多线作战能力**: {scores.get('versatility', {}).get('score', 0):.1f} / 100\n")
+        
+    except Exception as e:
+        logger.error(f"生成本地分析报告失败: {str(e)}")
+        lines.append(f"**错误**: 生成分析报告时出错: {str(e)}\n")
+    
+    lines.append("\n---\n\n")
+    lines.append("**注**: 本报告使用本地评价逻辑生成，基于统计数据和规则分析。如需更深入的AI分析，请配置AI服务。\n")
+    
+    return ''.join(lines)
+
+
+def generate_ai_analysis_report(analysis_result, author_name, since_date=None, until_date=None):
+    """
+    生成AI分析报告
+    
+    Args:
+        analysis_result: AI分析结果字典
+        author_name: 提交者姓名
+        since_date: 起始日期（可选）
+        until_date: 结束日期（可选）
+    
+    Returns:
+        str: Markdown格式的AI分析报告
+    """
+    lines = []
+    
+    # 标题
+    lines.append(f"# {author_name} - AI智能分析报告\n")
+    lines.append(f"**生成时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+    lines.append(f"**提交者**: {author_name}\n")
+    lines.append(f"**分析方式**: 🤖 AI智能分析（使用AI模型进行深度分析）\n")
+    
+    # 从analysis_result中提取AI服务信息（如果存在）
+    if 'ai_service' in analysis_result:
+        lines.append(f"**AI服务**: {analysis_result.get('ai_service', '未知')}\n")
+    if 'ai_model' in analysis_result:
+        lines.append(f"**AI模型**: {analysis_result.get('ai_model', '未知')}\n")
+    
+    if since_date and until_date:
+        lines.append(f"**分析时间范围**: {since_date} 至 {until_date}\n")
+    elif since_date:
+        lines.append(f"**起始日期**: {since_date}\n")
+    elif until_date:
+        lines.append(f"**结束日期**: {until_date}\n")
+    
+    lines.append("\n---\n\n")
+    
+    # 检查是否有错误
+    if 'error' in analysis_result:
+        lines.append("## ⚠️ 分析错误\n\n")
+        lines.append(f"AI分析过程中出现错误: {analysis_result['error']}\n\n")
+        if 'raw_response' in analysis_result:
+            lines.append("### 原始响应\n\n")
+            lines.append(f"```\n{analysis_result['raw_response']}\n```\n")
+        return ''.join(lines)
+    
+    # 检查是否有原始响应但无法解析（这种情况也应该显示原始响应）
+    if 'raw_response' in analysis_result and not any(
+        dim in analysis_result and isinstance(analysis_result[dim], dict) 
+        for dim in ['code_quality', 'work_pattern', 'tech_stack', 'problem_solving', 'innovation', 'collaboration']
+    ):
+        lines.append("## ⚠️ 解析警告\n\n")
+        lines.append("AI返回的响应无法解析为结构化JSON格式，以下是原始响应：\n\n")
+        lines.append("### 原始响应\n\n")
+        lines.append(f"```\n{analysis_result['raw_response']}\n```\n\n")
+        lines.append("**提示**: 这可能是由于AI返回的格式不符合预期，或者响应中包含无法解析的内容。\n")
+        return ''.join(lines)
+    
+    # 执行摘要
+    lines.append("## 📋 执行摘要\n\n")
+    
+    # 计算总体评分
+    dimensions = ['code_quality', 'work_pattern', 'tech_stack', 'problem_solving', 'innovation', 'collaboration']
+    scores = []
+    for dim in dimensions:
+        if dim in analysis_result and isinstance(analysis_result[dim], dict):
+            score = analysis_result[dim].get('score', 0)
+            scores.append(score)
+    
+    if scores:
+        overall_score = sum(scores) / len(scores)
+        lines.append(f"**总体评分**: {overall_score:.1f} / 100\n\n")
+        lines.append("**各维度评分**:\n")
+        for dim in dimensions:
+            if dim in analysis_result and isinstance(analysis_result[dim], dict):
+                score = analysis_result[dim].get('score', 0)
+                dim_name = {
+                    'code_quality': '代码质量',
+                    'work_pattern': '工作模式',
+                    'tech_stack': '技术栈',
+                    'problem_solving': '问题解决能力',
+                    'innovation': '创新性',
+                    'collaboration': '团队协作'
+                }.get(dim, dim)
+                lines.append(f"- {dim_name}: {score:.1f} / 100\n")
+        lines.append("\n")
+    
+    lines.append("---\n\n")
+    
+    # 详细分析
+    lines.append("## 🔍 详细分析\n\n")
+    
+    dimension_names = {
+        'code_quality': '代码质量评估',
+        'work_pattern': '工作模式分析',
+        'tech_stack': '技术栈评估',
+        'problem_solving': '问题解决能力',
+        'innovation': '创新性分析',
+        'collaboration': '团队协作'
+    }
+    
+    for dim in dimensions:
+        if dim in analysis_result and isinstance(analysis_result[dim], dict):
+            dim_data = analysis_result[dim]
+            dim_name = dimension_names.get(dim, dim)
+            score = dim_data.get('score', 0)
+            
+            lines.append(f"### {dim_name}: {score:.1f} / 100\n\n")
+            
+            # 详细分析
+            if 'analysis' in dim_data:
+                lines.append(f"**分析**:\n{dim_data['analysis']}\n\n")
+            
+            # 优势
+            if 'strengths' in dim_data and dim_data['strengths']:
+                lines.append("**优势**:\n")
+                if isinstance(dim_data['strengths'], list):
+                    for strength in dim_data['strengths']:
+                        lines.append(f"- {strength}\n")
+                else:
+                    lines.append(f"- {dim_data['strengths']}\n")
+                lines.append("\n")
+            
+            # 改进建议
+            if 'improvements' in dim_data and dim_data['improvements']:
+                lines.append("**改进建议**:\n")
+                if isinstance(dim_data['improvements'], list):
+                    for improvement in dim_data['improvements']:
+                        lines.append(f"- {improvement}\n")
+                else:
+                    lines.append(f"- {dim_data['improvements']}\n")
+                lines.append("\n")
+            
+            lines.append("---\n\n")
+    
+    # 如果有原始响应但无法解析
+    if 'raw_response' in analysis_result and not any(dim in analysis_result for dim in dimensions):
+        lines.append("## 📄 原始分析结果\n\n")
+        lines.append(f"```\n{analysis_result['raw_response']}\n```\n")
+    
+    lines.append("\n---\n\n")
+    lines.append("**注**: 本报告由AI自动生成，仅供参考。\n")
+    
+    return ''.join(lines)
+
+
 def generate_daily_report(all_results, author_name, since_date=None, until_date=None):
     """
     生成开发日报格式的 Markdown 文档
@@ -1178,11 +2019,55 @@ def generate_daily_report(all_results, author_name, since_date=None, until_date=
             emoji = item['emoji']
             time_str = item['time'].strftime('%H:%M')
             
-            commit_id = commit.id[:8]
-            commit_message = commit.message.split('\n')[0]
+            # 获取详细commit信息
+            try:
+                details = get_commit_details(project, commit)
+                short_message = details['short_message']
+                full_message = details['full_message']
+                stats = details['stats']
+                changed_files = details['changed_files']
+            except Exception as e:
+                logger.debug(f"获取commit详情失败: {str(e)}")
+                short_message = commit.message.split('\n')[0] if commit.message else ''
+                full_message = commit.message or ''
+                stats = None
+                changed_files = []
             
-            lines.append(f"{idx}. **{emoji} [{commit_type}]** [{commit_id}]({commit.web_url}) {commit_message}\n")
+            commit_id = commit.id[:8]
+            commit_url = getattr(commit, 'web_url', '')
+            
+            lines.append(f"{idx}. **{emoji} [{commit_type}]** [{commit_id}]({commit_url}) {short_message}\n")
             lines.append(f"   - 时间: {time_str}\n")
+            
+            # 显示完整的commit message（如果有多行）
+            if full_message and '\n' in full_message:
+                # 缩进显示完整信息
+                indented_message = '\n   '.join(full_message.split('\n'))
+                lines.append(f"   - 完整提交信息:\n   ```\n   {indented_message}\n   ```\n")
+            
+            # 显示代码行数统计
+            if stats:
+                lines.append(f"   - 代码变更: +{stats.get('additions', 0)} -{stats.get('deletions', 0)} (总计: {stats.get('total', 0)} 行)\n")
+            elif hasattr(commit, 'stats') and commit.stats:
+                try:
+                    commit_stats = commit.stats
+                    if isinstance(commit_stats, dict):
+                        lines.append(f"   - 代码变更: +{commit_stats.get('additions', 0)} -{commit_stats.get('deletions', 0)}\n")
+                except:
+                    pass
+            
+            # 显示文件变更列表（最多显示3个）
+            if changed_files:
+                lines.append(f"   - 变更文件 ({len(changed_files)} 个): ")
+                file_paths = []
+                for file_info in changed_files[:3]:
+                    file_path = file_info.get('new_path') or file_info.get('old_path') or file_info.get('path', '')
+                    if file_path:
+                        file_paths.append(f"`{file_path}`")
+                lines.append(', '.join(file_paths))
+                if len(changed_files) > 3:
+                    lines.append(f" 等 {len(changed_files)} 个文件")
+                lines.append("\n")
         
         lines.append("\n---\n\n")
     
@@ -1561,7 +2446,8 @@ def main():
             markdown_content = generate_markdown_log(
                 grouped_commits,
                 args.author,
-                repo_name=project.name
+                repo_name=project.name,
+                project=project
             )
             
             # 确定输出文件名

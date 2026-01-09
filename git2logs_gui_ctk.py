@@ -1,0 +1,1646 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+GitLab 提交日志生成工具 - CustomTkinter 现代化版本
+"""
+import sys
+import os
+
+# 尝试导入 CustomTkinter
+try:
+    import customtkinter as ctk
+    CTK_AVAILABLE = True
+except ImportError:
+    CTK_AVAILABLE = False
+    print("错误: 需要安装 CustomTkinter。请运行: pip install customtkinter")
+    sys.exit(1)
+
+from tkinter import messagebox, filedialog
+import threading
+import subprocess
+from pathlib import Path
+from datetime import datetime
+
+# 获取资源路径（支持打包后的环境）
+def resource_path(relative_path):
+    """获取资源文件的绝对路径，支持 PyInstaller 打包后的环境"""
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_path, relative_path)
+
+# 获取脚本路径
+def get_script_path(script_name):
+    """获取脚本文件的路径，优先使用打包后的路径，否则使用当前目录"""
+    if hasattr(sys, '_MEIPASS'):
+        script_path = os.path.join(sys._MEIPASS, script_name)
+        if os.path.exists(script_path):
+            return script_path
+    
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    script_path = os.path.join(current_dir, script_name)
+    if os.path.exists(script_path):
+        return script_path
+    
+    return script_name
+
+class Git2LogsGUI:
+    def __init__(self, root):
+        try:
+            self.root = root
+            self.root.title("GitLab 提交日志生成工具")
+            self.root.geometry("1000x800")
+            self.root.minsize(900, 700)
+            
+            # 保存待处理的AI分析数据
+            self._pending_ai_data = None
+            self._log_count = 0
+            
+            # 配置 CustomTkinter 主题
+            ctk.set_appearance_mode("dark")  # 强制暗黑模式
+            ctk.set_default_color_theme("blue")  # 使用蓝色主题
+            
+            # 定义颜色方案
+            self.bg_main = "#18181B"      # 主背景深灰
+            self.bg_card = "#27272A"      # 卡片背景
+            self.text_primary = "#F4F4F5"  # 主要文字（纯白/近白）
+            self.text_secondary = "#A1A1AA" # 次要文字
+            self.border_color = "#3F3F46"  # 边框色
+            self.accent_color = "#3B82F6"  # 科技蓝
+            self.success_color = "#10B981" # 成功绿
+            self.error_color = "#EF4444"   # 错误红
+            
+            # 设置窗口背景
+            self.root.configure(bg=self.bg_main)
+            
+            # 创建主容器
+            main_container = ctk.CTkFrame(root, fg_color=self.bg_main, corner_radius=0)
+            main_container.pack(fill="both", expand=True, padx=0, pady=0)
+            
+            # 标题区域
+            title_frame = ctk.CTkFrame(main_container, fg_color=self.bg_main, height=80, corner_radius=0)
+            title_frame.pack(fill="x", padx=0, pady=0)
+            title_frame.pack_propagate(False)
+            
+            title_label = ctk.CTkLabel(title_frame,
+                                     text="GitLab 提交日志生成工具",
+                                     font=ctk.CTkFont(size=24, weight="bold"),
+                                     text_color=self.text_primary,
+                                     fg_color="transparent")
+            title_label.pack(pady=(20, 4))
+            
+            subtitle_label = ctk.CTkLabel(title_frame,
+                                         text="轻松生成和管理您的代码提交报告",
+                                         font=ctk.CTkFont(size=13),
+                                         text_color=self.text_secondary,
+                                         fg_color="transparent")
+            subtitle_label.pack()
+            
+            # 创建 Segmented Control 风格的标签导航
+            self.tab_container = ctk.CTkFrame(main_container, fg_color=self.bg_main, height=50, corner_radius=0)
+            self.tab_container.pack(fill="x", padx=20, pady=(10, 0))
+            self.tab_container.pack_propagate(False)
+            
+            # 标签按钮容器
+            tab_button_frame = ctk.CTkFrame(self.tab_container, fg_color=self.bg_card, corner_radius=8)
+            tab_button_frame.pack(side="left", padx=0, pady=8)
+            
+            # 存储标签页引用
+            self.tab_frames = {}
+            self.current_tab = None
+            self.tab_buttons = []
+            
+            # 创建标签按钮（Segmented Control 风格）
+            tab_names = ["GitLab配置", "日期和输出", "AI分析"]
+            for i, name in enumerate(tab_names):
+                btn = ctk.CTkButton(tab_button_frame,
+                                  text=name,
+                                  font=ctk.CTkFont(size=13, weight="normal"),
+                                  fg_color=self.bg_card if i == 0 else "transparent",
+                                  text_color=self.text_primary if i == 0 else self.text_secondary,
+                                  hover_color="#3F3F46",
+                                  corner_radius=6,
+                                  height=36,
+                                  width=140,
+                                  command=lambda n=name: self._switch_tab(n),
+                                  border_width=0)
+                btn.pack(side="left", padx=2, pady=4)
+                self.tab_buttons.append((name, btn))
+            
+            # 创建内容容器（可滚动）- 使用原生 Canvas 以获得更好的性能
+            canvas_frame = ctk.CTkFrame(main_container, fg_color=self.bg_main, corner_radius=0)
+            canvas_frame.pack(fill="both", expand=True, padx=0, pady=0)
+            
+            # 使用原生 tkinter Canvas 实现滚动，性能更好
+            from tkinter import Canvas, Scrollbar
+            self.scroll_canvas = Canvas(canvas_frame,
+                                       bg=self.bg_main,
+                                       highlightthickness=0,
+                                       borderwidth=0)
+            
+            scrollbar = Scrollbar(canvas_frame,
+                                orient="vertical",
+                                command=self.scroll_canvas.yview,
+                                bg=self.bg_card,
+                                troughcolor=self.bg_main,
+                                activebackground=self.bg_card,
+                                width=12)
+            
+            self.content_container = ctk.CTkFrame(self.scroll_canvas,
+                                                 fg_color=self.bg_main,
+                                                 corner_radius=0)
+            
+            # 将内容容器添加到 Canvas
+            canvas_window = self.scroll_canvas.create_window((0, 0),
+                                                            window=self.content_container,
+                                                            anchor="nw")
+            
+            # 配置滚动区域（优化性能，减少闪烁）
+            self._scroll_update_timer = None
+            def configure_scroll_region(event=None):
+                # 取消之前的定时器
+                if self._scroll_update_timer:
+                    self.root.after_cancel(self._scroll_update_timer)
+                    self._scroll_update_timer = None
+                
+                # 延迟更新，避免频繁刷新
+                def do_update():
+                    try:
+                        bbox = self.scroll_canvas.bbox("all")
+                        if bbox:
+                            # 只在边界框确实改变时才更新
+                            current_region = self.scroll_canvas.cget("scrollregion")
+                            new_region = f"{bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]}"
+                            if current_region != new_region:
+                                self.scroll_canvas.configure(scrollregion=bbox)
+                    except:
+                        pass
+                    self._scroll_update_timer = None
+                
+                # 使用较短的延迟，但确保不会累积
+                self._scroll_update_timer = self.root.after(16, do_update)  # ~60fps
+            
+            def configure_canvas_width(event):
+                # 确保内容宽度匹配画布宽度
+                canvas_width = event.width
+                self.scroll_canvas.itemconfig(canvas_window, width=canvas_width)
+                configure_scroll_region()
+            
+            # 绑定事件（使用防抖机制）
+            self.content_container.bind('<Configure>', lambda e: configure_scroll_region())
+            
+            self.scroll_canvas.bind('<Configure>', configure_canvas_width)
+            
+            # 绑定鼠标滚轮（优化性能）
+            def on_mousewheel(event):
+                # 检查是否在滚动区域内
+                if self.scroll_canvas.winfo_containing(event.x_root, event.y_root):
+                    # macOS 使用 delta，Windows/Linux 使用 delta/120
+                    if sys.platform == 'darwin':
+                        delta = int(-1 * event.delta)
+                    else:
+                        delta = int(-1 * (event.delta / 120))
+                    self.scroll_canvas.yview_scroll(delta, "units")
+                    return "break"
+            
+            # 绑定滚轮事件到画布
+            self.scroll_canvas.bind_all("<MouseWheel>", on_mousewheel)
+            if sys.platform != 'darwin':
+                self.scroll_canvas.bind_all("<Button-4>", lambda e: self.scroll_canvas.yview_scroll(-1, "units"))
+                self.scroll_canvas.bind_all("<Button-5>", lambda e: self.scroll_canvas.yview_scroll(1, "units"))
+            
+            # 布局 Canvas 和 Scrollbar
+            self.scroll_canvas.pack(side="left", fill="both", expand=True)
+            scrollbar.pack(side="right", fill="y")
+            self.scroll_canvas.configure(yscrollcommand=scrollbar.set)
+            
+            # 优化：禁用画布自动更新以提高性能
+            self.scroll_canvas.configure(highlightthickness=0)
+            
+            # 创建所有标签页内容
+            self._create_tab1_gitlab_config()
+            self._create_tab2_date_output()
+            self._create_tab3_ai_analysis()
+            
+            # 创建底部操作区域（固定在底部，不滚动）
+            self._create_bottom_actions(main_container)
+            
+            # 默认显示第一个标签页
+            self._switch_tab("GitLab配置")
+            
+            # 初始日志
+            self.log("欢迎使用 GitLab 提交日志生成工具！", "info")
+            self.log("请填写参数后点击'生成日志'按钮。", "info")
+            
+        except Exception as e:
+            import traceback
+            error_msg = f"界面初始化失败: {str(e)}\n\n{traceback.format_exc()}"
+            print(error_msg)
+            try:
+                messagebox.showerror("初始化错误", error_msg)
+            except:
+                pass
+            raise
+    
+    def _create_tab1_gitlab_config(self):
+        """创建标签页1: GitLab配置"""
+        tab1 = ctk.CTkFrame(self.content_container, fg_color=self.bg_card, corner_radius=10)
+        tab1.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        # 内容容器
+        content = ctk.CTkFrame(tab1, fg_color="transparent")
+        content.pack(fill="both", expand=True, padx=30, pady=30)
+        
+        row = 0
+        
+        # GitLab URL
+        url_label = ctk.CTkLabel(content, text="GitLab URL",
+                                font=ctk.CTkFont(size=14, weight="bold"),
+                                text_color=self.text_primary,
+                                anchor="w")
+        url_label.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        row += 1
+        
+        self.gitlab_url = ctk.StringVar()
+        gitlab_entry = ctk.CTkEntry(content,
+                                  textvariable=self.gitlab_url,
+                                  placeholder_text="https://gitlab.com 或 http://gitlab.yourcompany.com",
+                                  font=ctk.CTkFont(size=13),
+                                  height=40,
+                                  corner_radius=8,
+                                  border_width=1,
+                                  border_color=self.border_color,
+                                  fg_color=self.bg_main,
+                                  text_color=self.text_primary)
+        gitlab_entry.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 24))
+        row += 1
+        
+        # 仓库地址
+        repo_label = ctk.CTkLabel(content, text="仓库地址",
+                                 font=ctk.CTkFont(size=14, weight="bold"),
+                                 text_color=self.text_primary,
+                                 anchor="w")
+        repo_label.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        row += 1
+        
+        self.repo = ctk.StringVar()
+        repo_entry = ctk.CTkEntry(content,
+                                 textvariable=self.repo,
+                                 font=ctk.CTkFont(size=13),
+                                 height=40,
+                                 corner_radius=8,
+                                 border_width=1,
+                                 border_color=self.border_color,
+                                 fg_color=self.bg_main,
+                                 text_color=self.text_primary)
+        repo_entry.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 16))
+        row += 1
+        
+        # 扫描所有项目选项
+        self.scan_all = ctk.BooleanVar(value=False)
+        scan_check = ctk.CTkCheckBox(content,
+                                    text="自动扫描所有项目（不填仓库地址时启用）",
+                                    variable=self.scan_all,
+                                    font=ctk.CTkFont(size=13),
+                                    text_color=self.text_primary,
+                                    fg_color=self.accent_color,
+                                    corner_radius=4)
+        scan_check.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 24))
+        row += 1
+        
+        # 分支
+        branch_label = ctk.CTkLabel(content, text="分支",
+                                  font=ctk.CTkFont(size=14, weight="bold"),
+                                  text_color=self.text_primary,
+                                  anchor="w")
+        branch_label.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        row += 1
+        
+        self.branch = ctk.StringVar()
+        branch_entry = ctk.CTkEntry(content,
+                                   textvariable=self.branch,
+                                   font=ctk.CTkFont(size=13),
+                                   height=40,
+                                   corner_radius=8,
+                                   border_width=1,
+                                   border_color=self.border_color,
+                                   fg_color=self.bg_main,
+                                   text_color=self.text_primary)
+        branch_entry.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 24))
+        row += 1
+        
+        # 提交者
+        author_label = ctk.CTkLabel(content, text="提交者",
+                                   font=ctk.CTkFont(size=14, weight="bold"),
+                                   text_color=self.text_primary,
+                                   anchor="w")
+        author_label.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        row += 1
+        
+        self.author = ctk.StringVar(value="MIZUKI")
+        author_entry = ctk.CTkEntry(content,
+                                   textvariable=self.author,
+                                   font=ctk.CTkFont(size=13),
+                                   height=40,
+                                   corner_radius=8,
+                                   border_width=1,
+                                   border_color=self.border_color,
+                                   fg_color=self.bg_main,
+                                   text_color=self.text_primary)
+        author_entry.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 24))
+        row += 1
+        
+        # 访问令牌
+        token_label = ctk.CTkLabel(content, text="访问令牌",
+                                 font=ctk.CTkFont(size=14, weight="bold"),
+                                 text_color=self.text_primary,
+                                 anchor="w")
+        token_label.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        row += 1
+        
+        self.token = ctk.StringVar()
+        token_frame = ctk.CTkFrame(content, fg_color="transparent")
+        token_frame.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 24))
+        token_frame.columnconfigure(0, weight=1)
+        
+        token_entry = ctk.CTkEntry(token_frame,
+                                  textvariable=self.token,
+                                  show="*",
+                                  font=ctk.CTkFont(size=13),
+                                  height=40,
+                                  corner_radius=8,
+                                  border_width=1,
+                                  border_color=self.border_color,
+                                  fg_color=self.bg_main,
+                                  text_color=self.text_primary)
+        token_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        
+        show_btn = ctk.CTkButton(token_frame,
+                                text="显示",
+                                width=80,
+                                height=40,
+                                font=ctk.CTkFont(size=13),
+                                corner_radius=8,
+                                fg_color=self.bg_card,
+                                text_color=self.text_primary,
+                                hover_color="#3F3F46",
+                                border_width=1,
+                                border_color=self.border_color,
+                                command=lambda: self.toggle_token_visibility(token_entry))
+        show_btn.grid(row=0, column=1)
+        row += 1
+        
+        # 使用提示卡片
+        hint_frame = ctk.CTkFrame(content,
+                                 fg_color=self.bg_main,
+                                 corner_radius=8,
+                                 border_width=1,
+                                 border_color=self.border_color)
+        hint_frame.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        
+        hint_title = ctk.CTkLabel(hint_frame,
+                                text="使用提示",
+                                font=ctk.CTkFont(size=13, weight="bold"),
+                                text_color=self.text_primary,
+                                anchor="w")
+        hint_title.pack(anchor="w", padx=16, pady=(16, 8))
+        
+        hint_text = "• GitLab URL 是您的GitLab实例地址\n• 仓库地址留空时，勾选'自动扫描所有项目'可扫描所有项目\n• 访问令牌用于身份验证，可在GitLab设置中生成"
+        hint_label = ctk.CTkLabel(hint_frame,
+                                 text=hint_text,
+                                 font=ctk.CTkFont(size=12),
+                                 text_color=self.text_secondary,
+                                 justify="left",
+                                 anchor="w")
+        hint_label.pack(anchor="w", padx=16, pady=(0, 16))
+        
+        content.columnconfigure(0, weight=1)
+        
+        self.tab_frames["GitLab配置"] = tab1
+        tab1.pack_forget()  # 初始隐藏
+    
+    def _create_tab2_date_output(self):
+        """创建标签页2: 日期和输出"""
+        tab2 = ctk.CTkFrame(self.content_container, fg_color=self.bg_card, corner_radius=10)
+        tab2.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        content = ctk.CTkFrame(tab2, fg_color="transparent")
+        content.pack(fill="both", expand=True, padx=30, pady=30)
+        
+        row = 0
+        
+        # 日期范围卡片
+        date_card = ctk.CTkFrame(content, fg_color=self.bg_main, corner_radius=10)
+        date_card.grid(row=row, column=0, sticky="ew", pady=(0, 20))
+        date_card.columnconfigure(1, weight=1)
+        
+        date_title = ctk.CTkLabel(date_card,
+                                text="日期范围",
+                                font=ctk.CTkFont(size=15, weight="bold"),
+                                text_color=self.text_primary,
+                                anchor="w")
+        date_title.grid(row=0, column=0, columnspan=2, sticky="w", padx=20, pady=(20, 16))
+        
+        date_row = 1
+        self.use_today = ctk.BooleanVar(value=True)
+        today_check = ctk.CTkCheckBox(date_card,
+                                    text="今天",
+                                    variable=self.use_today,
+                                    font=ctk.CTkFont(size=13),
+                                    text_color=self.text_primary,
+                                    fg_color=self.accent_color,
+                                    corner_radius=4,
+                                    command=self.toggle_date_inputs)
+        today_check.grid(row=date_row, column=0, sticky="w", padx=20, pady=8)
+        
+        date_input_frame = ctk.CTkFrame(date_card, fg_color="transparent")
+        date_input_frame.grid(row=date_row, column=1, sticky="ew", padx=(0, 20))
+        
+        since_label = ctk.CTkLabel(date_input_frame,
+                                 text="起始日期",
+                                 font=ctk.CTkFont(size=11),
+                                 text_color=self.text_secondary,
+                                 anchor="w")
+        since_label.grid(row=0, column=0, padx=(0, 8), sticky="w")
+        self.since_date = ctk.StringVar()
+        self.since_entry = ctk.CTkEntry(date_input_frame,
+                                      textvariable=self.since_date,
+                                      font=ctk.CTkFont(size=12),
+                                      width=140,
+                                      height=36,
+                                      corner_radius=8,
+                                      border_width=1,
+                                      border_color=self.border_color,
+                                      fg_color=self.bg_card,
+                                      text_color=self.text_primary)
+        self.since_entry.grid(row=1, column=0, padx=(0, 20), pady=(6, 0))
+        
+        until_label = ctk.CTkLabel(date_input_frame,
+                                 text="结束日期",
+                                 font=ctk.CTkFont(size=11),
+                                 text_color=self.text_secondary,
+                                 anchor="w")
+        until_label.grid(row=0, column=1, padx=(0, 8), sticky="w")
+        self.until_date = ctk.StringVar()
+        self.until_entry = ctk.CTkEntry(date_input_frame,
+                                      textvariable=self.until_date,
+                                      font=ctk.CTkFont(size=12),
+                                      width=140,
+                                      height=36,
+                                      corner_radius=8,
+                                      border_width=1,
+                                      border_color=self.border_color,
+                                      fg_color=self.bg_card,
+                                      text_color=self.text_primary)
+        self.until_entry.grid(row=1, column=1, pady=(6, 0))
+        
+        date_hint = ctk.CTkLabel(date_card,
+                               text="提示: 日期格式为 YYYY-MM-DD，例如: 2025-12-12",
+                               font=ctk.CTkFont(size=11),
+                               text_color=self.text_secondary,
+                               anchor="w")
+        date_hint.grid(row=2, column=0, columnspan=2, sticky="w", padx=20, pady=(16, 20))
+        
+        self.toggle_date_inputs()
+        row += 1
+        
+        # 输出格式卡片
+        format_card = ctk.CTkFrame(content, fg_color=self.bg_main, corner_radius=10)
+        format_card.grid(row=row, column=0, sticky="ew", pady=(0, 20))
+        format_card.columnconfigure(0, weight=1)
+        
+        format_title = ctk.CTkLabel(format_card,
+                                  text="输出格式",
+                                  font=ctk.CTkFont(size=15, weight="bold"),
+                                  text_color=self.text_primary,
+                                  anchor="w")
+        format_title.grid(row=0, column=0, sticky="w", padx=20, pady=(20, 16))
+        
+        self.output_format = ctk.StringVar(value="daily_report")
+        format_options = [
+            ("Markdown 提交日志", "commits"),
+            ("开发日报 (Markdown)", "daily_report"),
+            ("统计报告 (代码统计与评分)", "statistics"),
+            ("HTML 格式", "html"),
+            ("PNG 图片", "png"),
+            ("批量生成所有格式", "all")
+        ]
+        
+        for i, (text, value) in enumerate(format_options):
+            rb = ctk.CTkRadioButton(format_card,
+                                  text=text,
+                                  variable=self.output_format,
+                                  value=value,
+                                  font=ctk.CTkFont(size=13),
+                                  text_color=self.text_primary,
+                                  fg_color=self.accent_color,
+                                  corner_radius=4)
+            rb.grid(row=i+1, column=0, sticky="w", padx=20, pady=8)
+        
+        row += 1
+        
+        # 输出设置卡片
+        output_card = ctk.CTkFrame(content, fg_color=self.bg_main, corner_radius=10)
+        output_card.grid(row=row, column=0, sticky="ew", pady=(0, 0))
+        output_card.columnconfigure(0, weight=1)
+        
+        output_title = ctk.CTkLabel(output_card,
+                                  text="输出设置",
+                                  font=ctk.CTkFont(size=15, weight="bold"),
+                                  text_color=self.text_primary,
+                                  anchor="w")
+        output_title.grid(row=0, column=0, sticky="w", padx=20, pady=(20, 16))
+        
+        output_label_text = "输出目录" if self.output_format.get() == "all" else "输出文件"
+        self.output_label = ctk.CTkLabel(output_card,
+                                      text=output_label_text,
+                                      font=ctk.CTkFont(size=14, weight="bold"),
+                                      text_color=self.text_primary,
+                                      anchor="w")
+        self.output_label.grid(row=1, column=0, sticky="w", padx=20, pady=(0, 8))
+        
+        self.output_file = ctk.StringVar()
+        output_frame = ctk.CTkFrame(output_card, fg_color="transparent")
+        output_frame.grid(row=2, column=0, sticky="ew", padx=20, pady=(0, 8))
+        output_frame.columnconfigure(0, weight=1)
+        
+        output_entry = ctk.CTkEntry(output_frame,
+                                  textvariable=self.output_file,
+                                  font=ctk.CTkFont(size=13),
+                                  height=40,
+                                  corner_radius=8,
+                                  border_width=1,
+                                  border_color=self.border_color,
+                                  fg_color=self.bg_card,
+                                  text_color=self.text_primary)
+        output_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        
+        browse_btn = ctk.CTkButton(output_frame,
+                                 text="浏览",
+                                 width=100,
+                                 height=40,
+                                 font=ctk.CTkFont(size=13),
+                                 corner_radius=8,
+                                 fg_color=self.bg_card,
+                                 text_color=self.text_primary,
+                                 hover_color="#3F3F46",
+                                 border_width=1,
+                                 border_color=self.border_color,
+                                 command=self.browse_output_file)
+        browse_btn.grid(row=0, column=1)
+        
+        self.output_hint = ctk.CTkLabel(output_card,
+                                       text="提示: 批量生成时请选择目录",
+                                       font=ctk.CTkFont(size=11),
+                                       text_color=self.text_secondary,
+                                       anchor="w")
+        self.output_hint.grid(row=3, column=0, sticky="w", padx=20, pady=(0, 20))
+        
+        # 绑定输出格式变化事件
+        def setup_output_format_trace():
+            try:
+                self.output_format.trace('w', self.on_output_format_changed)
+            except Exception:
+                pass
+        self.root.after(100, setup_output_format_trace)
+        
+        content.columnconfigure(0, weight=1)
+        
+        self.tab_frames["日期和输出"] = tab2
+        tab2.pack_forget()
+    
+    def _create_tab3_ai_analysis(self):
+        """创建标签页3: AI分析"""
+        tab3 = ctk.CTkFrame(self.content_container, fg_color=self.bg_card, corner_radius=10)
+        tab3.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        content = ctk.CTkFrame(tab3, fg_color="transparent")
+        content.pack(fill="both", expand=True, padx=30, pady=30)
+        content.columnconfigure(1, weight=1)
+        
+        row = 0
+        
+        # AI分析开关
+        self.ai_enabled = ctk.BooleanVar(value=False)
+        ai_enable_check = ctk.CTkCheckBox(content,
+                                         text="启用AI分析",
+                                         variable=self.ai_enabled,
+                                         font=ctk.CTkFont(size=14, weight="bold"),
+                                         text_color=self.text_primary,
+                                         fg_color=self.accent_color,
+                                         corner_radius=4,
+                                         command=self.toggle_ai_config)
+        ai_enable_check.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 24))
+        row += 1
+        
+        # AI配置区域（默认隐藏）
+        self.ai_config_frame = ctk.CTkFrame(content, fg_color=self.bg_main, corner_radius=10)
+        self.ai_config_frame.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 0))
+        self.ai_config_frame.columnconfigure(1, weight=1)
+        
+        ai_title = ctk.CTkLabel(self.ai_config_frame,
+                              text="AI配置",
+                              font=ctk.CTkFont(size=15, weight="bold"),
+                              text_color=self.text_primary,
+                              anchor="w")
+        ai_title.grid(row=0, column=0, columnspan=2, sticky="w", padx=20, pady=(20, 20))
+        
+        config_row = 1
+        
+        # AI服务选择
+        service_label = ctk.CTkLabel(self.ai_config_frame,
+                                    text="AI服务",
+                                    font=ctk.CTkFont(size=14, weight="bold"),
+                                    text_color=self.text_primary,
+                                    anchor="w")
+        service_label.grid(row=config_row, column=0, sticky="w", padx=20, pady=(0, 8))
+        
+        self.ai_service = ctk.StringVar(value="openai")
+        ai_service_combo = ctk.CTkComboBox(self.ai_config_frame,
+                                          values=["openai", "anthropic", "gemini"],
+                                          variable=self.ai_service,
+                                          font=ctk.CTkFont(size=13),
+                                          height=40,
+                                          corner_radius=8,
+                                          border_width=1,
+                                          border_color=self.border_color,
+                                          fg_color=self.bg_card,
+                                          text_color=self.text_primary,
+                                          button_color=self.bg_card,
+                                          button_hover_color="#3F3F46",
+                                          dropdown_fg_color=self.bg_card,
+                                          dropdown_text_color=self.text_primary,
+                                          dropdown_hover_color="#3F3F46",
+                                          command=self._update_ai_models)
+        ai_service_combo.grid(row=config_row, column=1, sticky="ew", padx=(0, 20), pady=(0, 24))
+        config_row += 1
+        
+        # 模型选择
+        model_label = ctk.CTkLabel(self.ai_config_frame,
+                                 text="模型",
+                                 font=ctk.CTkFont(size=14, weight="bold"),
+                                 text_color=self.text_primary,
+                                 anchor="w")
+        model_label.grid(row=config_row, column=0, sticky="w", padx=20, pady=(0, 8))
+        
+        self.ai_model = ctk.StringVar(value="gpt-4")
+        self.ai_model_combo = ctk.CTkComboBox(self.ai_config_frame,
+                                             values=["gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"],
+                                             variable=self.ai_model,
+                                             font=ctk.CTkFont(size=13),
+                                             height=40,
+                                             corner_radius=8,
+                                             border_width=1,
+                                             border_color=self.border_color,
+                                             fg_color=self.bg_card,
+                                             text_color=self.text_primary,
+                                             button_color=self.bg_card,
+                                             button_hover_color="#3F3F46",
+                                             dropdown_fg_color=self.bg_card,
+                                             dropdown_text_color=self.text_primary,
+                                             dropdown_hover_color="#3F3F46")
+        self.ai_model_combo.grid(row=config_row, column=1, sticky="ew", padx=(0, 20), pady=(0, 24))
+        config_row += 1
+        
+        # API Key
+        key_label = ctk.CTkLabel(self.ai_config_frame,
+                               text="API Key",
+                               font=ctk.CTkFont(size=14, weight="bold"),
+                               text_color=self.text_primary,
+                               anchor="w")
+        key_label.grid(row=config_row, column=0, sticky="w", padx=20, pady=(0, 8))
+        
+        self.ai_api_key = ctk.StringVar()
+        key_frame = ctk.CTkFrame(self.ai_config_frame, fg_color="transparent")
+        key_frame.grid(row=config_row, column=1, sticky="ew", padx=(0, 20), pady=(0, 24))
+        key_frame.columnconfigure(0, weight=1)
+        
+        ai_key_entry = ctk.CTkEntry(key_frame,
+                                   textvariable=self.ai_api_key,
+                                   show="*",
+                                   font=ctk.CTkFont(size=13),
+                                   height=40,
+                                   corner_radius=8,
+                                   border_width=1,
+                                   border_color=self.border_color,
+                                   fg_color=self.bg_card,
+                                   text_color=self.text_primary)
+        ai_key_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        
+        key_show_btn = ctk.CTkButton(key_frame,
+                                    text="显示",
+                                    width=80,
+                                    height=40,
+                                    font=ctk.CTkFont(size=13),
+                                    corner_radius=8,
+                                    fg_color=self.bg_card,
+                                    text_color=self.text_primary,
+                                    hover_color="#3F3F46",
+                                    border_width=1,
+                                    border_color=self.border_color,
+                                    command=lambda: self.toggle_key_visibility(ai_key_entry))
+        key_show_btn.grid(row=0, column=1)
+        config_row += 1
+        
+        # 测试连接按钮
+        test_btn_frame = ctk.CTkFrame(self.ai_config_frame, fg_color="transparent")
+        test_btn_frame.grid(row=config_row, column=0, columnspan=2, pady=(8, 20), sticky="w", padx=20)
+        
+        test_btn = ctk.CTkButton(test_btn_frame,
+                               text="测试连接",
+                               width=140,
+                               height=40,
+                               font=ctk.CTkFont(size=13),
+                               corner_radius=8,
+                               fg_color=self.bg_card,
+                               text_color=self.text_primary,
+                               hover_color="#3F3F46",
+                               border_width=1,
+                               border_color=self.border_color,
+                               command=self.test_ai_connection)
+        test_btn.pack(side="left", padx=(0, 12))
+        
+        self.test_status_label = ctk.CTkLabel(test_btn_frame,
+                                            text="",
+                                            font=ctk.CTkFont(size=12),
+                                            text_color=self.text_secondary,
+                                            anchor="w")
+        self.test_status_label.pack(side="left")
+        
+        # 初始隐藏AI配置
+        self.ai_config_frame.grid_remove()
+        
+        self.tab_frames["AI分析"] = tab3
+        tab3.pack_forget()
+    
+    def _create_bottom_actions(self, parent):
+        """创建底部操作区域（添加到可滚动容器中）"""
+        # 执行按钮区域
+        button_container = ctk.CTkFrame(self.content_container,
+                                       fg_color=self.bg_main,
+                                       height=70,
+                                       corner_radius=0)
+        button_container.pack(fill="x", padx=0, pady=(20, 0))
+        button_container.pack_propagate(False)
+        
+        button_frame = ctk.CTkFrame(button_container, fg_color="transparent")
+        button_frame.pack(pady=15)
+        
+        # 主按钮 - 绿色渐变效果（使用绿色）
+        self.generate_btn = ctk.CTkButton(button_frame,
+                                        text="生成日志",
+                                        width=160,
+                                        height=45,
+                                        font=ctk.CTkFont(size=14, weight="bold"),
+                                        corner_radius=10,
+                                        fg_color=self.success_color,
+                                        text_color="white",
+                                        hover_color="#059669",
+                                        command=self.generate_logs)
+        self.generate_btn.pack(side="left", padx=8)
+        
+        # 次要按钮
+        clear_btn = ctk.CTkButton(button_frame,
+                                text="清空日志",
+                                width=160,
+                                height=45,
+                                font=ctk.CTkFont(size=14),
+                                corner_radius=10,
+                                fg_color=self.bg_card,
+                                text_color=self.text_primary,
+                                hover_color="#3F3F46",
+                                border_width=1,
+                                border_color=self.border_color,
+                                command=self.clear_logs)
+        clear_btn.pack(side="left", padx=8)
+        
+        # AI分析按钮
+        self.ai_analysis_btn = ctk.CTkButton(button_frame,
+                                           text="执行AI分析",
+                                           width=160,
+                                           height=45,
+                                           font=ctk.CTkFont(size=14),
+                                           corner_radius=10,
+                                           fg_color=self.bg_card,
+                                           text_color=self.text_primary,
+                                           hover_color="#3F3F46",
+                                           border_width=1,
+                                           border_color=self.border_color,
+                                           state="normal",
+                                           command=self._manual_ai_analysis)
+        self.ai_analysis_btn.pack(side="left", padx=8)
+        
+        # 日志输出区域（添加到可滚动容器中）
+        log_container = ctk.CTkFrame(self.content_container, fg_color=self.bg_main, corner_radius=0)
+        log_container.pack(fill="both", expand=True, padx=0, pady=(0, 20))
+        
+        log_title_frame = ctk.CTkFrame(log_container,
+                                     fg_color=self.bg_main,
+                                     height=50,
+                                     corner_radius=0)
+        log_title_frame.pack(fill="x", padx=0, pady=0)
+        log_title_frame.pack_propagate(False)
+        
+        log_title = ctk.CTkLabel(log_title_frame,
+                              text="执行日志",
+                              font=ctk.CTkFont(size=14, weight="bold"),
+                              text_color=self.text_primary,
+                              anchor="w")
+        log_title.pack(side="left", padx=20, pady=15)
+        
+        # 日志文本区域 - 使用等宽字体，带内阴影效果
+        log_card = ctk.CTkFrame(log_container,
+                              fg_color=self.bg_card,
+                              corner_radius=10)
+        log_card.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        
+        # 使用 ScrolledText（CustomTkinter 没有原生的 ScrolledText）
+        # 创建一个内部Frame来放置ScrolledText
+        text_container = ctk.CTkFrame(log_card, fg_color=self.bg_main, corner_radius=8)
+        text_container.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        from tkinter import scrolledtext
+        self.log_text = scrolledtext.ScrolledText(text_container,
+                                             height=15,
+                                             width=80,
+                                             font=("JetBrains Mono", 11),  # 等宽字体
+                                             wrap="word",
+                                             bg=self.bg_main,
+                                             fg=self.text_primary,
+                                             insertbackground=self.accent_color,
+                                             selectbackground=self.accent_color,
+                                             selectforeground="white",
+                                             borderwidth=0,
+                                             relief="flat",
+                                             padx=15,
+                                             pady=15)
+        self.log_text.pack(fill="both", expand=True)
+    
+    def _switch_tab(self, tab_name):
+        """切换标签页（Segmented Control 风格）"""
+        try:
+            # 隐藏所有标签页
+            for name, frame in self.tab_frames.items():
+                frame.pack_forget()
+            
+            # 显示选中的标签页
+            if tab_name in self.tab_frames:
+                self.tab_frames[tab_name].pack(fill="both", expand=True, padx=20, pady=20)
+                self.current_tab = tab_name
+            
+            # 更新按钮样式（Segmented Control 效果）
+            for name, btn in self.tab_buttons:
+                if name == tab_name:
+                    # 选中状态 - 背景色，文字更亮，带科技蓝下划线效果（通过背景色模拟）
+                    btn.configure(fg_color=self.bg_card,
+                                 text_color=self.text_primary,
+                                 hover_color="#3F3F46")
+                else:
+                    # 未选中状态 - 透明背景，文字较暗
+                    btn.configure(fg_color="transparent",
+                                 text_color=self.text_secondary,
+                                 hover_color="#3F3F46")
+            
+            # 优化：延迟更新滚动区域，避免切换标签时的闪烁
+            def delayed_update():
+                try:
+                    if hasattr(self, 'scroll_canvas'):
+                        bbox = self.scroll_canvas.bbox("all")
+                        if bbox:
+                            self.scroll_canvas.configure(scrollregion=bbox)
+                except:
+                    pass
+            
+            self.root.after(50, delayed_update)  # 延迟 50ms 更新
+        except Exception as e:
+            print(f"切换标签页错误: {e}")
+    
+    def _update_ai_models(self, *args):
+        """更新AI模型列表"""
+        try:
+            service = self.ai_service.get()
+            if service == "openai":
+                models = ["gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"]
+                if self.ai_model.get() not in models:
+                    self.ai_model.set("gpt-4")
+            elif service == "anthropic":
+                models = ["claude-3-5-sonnet-20241022", "claude-3-opus-20240229", "claude-3-sonnet-20240229"]
+                if self.ai_model.get() not in models:
+                    self.ai_model.set("claude-3-5-sonnet-20241022")
+            elif service == "gemini":
+                models = ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5", "gemini-1.5-pro", "gemini-1.5-flash"]
+                if self.ai_model.get() not in models:
+                    self.ai_model.set("gemini-2.5-flash")
+            
+            self.ai_model_combo.configure(values=models)
+        except Exception:
+            pass
+    
+    def toggle_token_visibility(self, entry):
+        """切换令牌显示/隐藏"""
+        try:
+            if entry.cget('show') == '*':
+                entry.configure(show='')
+            else:
+                entry.configure(show='*')
+            entry.focus_set()
+            self.root.update_idletasks()
+        except Exception:
+            pass
+    
+    def toggle_key_visibility(self, entry):
+        """切换API Key显示/隐藏"""
+        try:
+            if entry.cget('show') == '*':
+                entry.configure(show='')
+            else:
+                entry.configure(show='*')
+            entry.focus_set()
+            self.root.update_idletasks()
+        except Exception:
+            pass
+    
+    def toggle_ai_config(self):
+        """切换AI配置区域的显示/隐藏"""
+        try:
+            if self.ai_enabled.get():
+                self.ai_config_frame.grid()
+            else:
+                self.ai_config_frame.grid_remove()
+            self.root.update_idletasks()
+        except Exception:
+            pass
+    
+    def toggle_date_inputs(self):
+        """切换日期输入框的启用/禁用状态"""
+        try:
+            if self.use_today.get():
+                self.since_entry.configure(state="disabled")
+                self.until_entry.configure(state="disabled")
+            else:
+                self.since_entry.configure(state="normal")
+                self.until_entry.configure(state="normal")
+            self.root.update_idletasks()
+        except Exception:
+            pass
+    
+    def on_output_format_changed(self, *args):
+        """输出格式变化时的回调"""
+        try:
+            format_value = self.output_format.get()
+            if format_value == "all":
+                self.output_label.configure(text="输出目录")
+                self.output_hint.configure(text="提示: 批量生成时请选择目录，所有文件将保存到该目录")
+            else:
+                self.output_label.configure(text="输出文件")
+                self.output_hint.configure(text="提示: 批量生成时请选择目录")
+            self.root.update_idletasks()
+        except Exception:
+            pass
+    
+    def browse_output_file(self):
+        """浏览输出文件/目录"""
+        try:
+            format_value = self.output_format.get()
+            if format_value == "all":
+                directory = filedialog.askdirectory(
+                    title="选择输出目录",
+                    initialdir=self.output_file.get().strip() or os.getcwd()
+                )
+                if directory:
+                    self.output_file.set(directory)
+            else:
+                filename = filedialog.asksaveasfilename(
+                    title="选择输出文件",
+                    initialdir=self.output_file.get().strip() or os.getcwd(),
+                    defaultextension=".md",
+                    filetypes=[("Markdown文件", "*.md"), ("所有文件", "*.*")]
+                )
+                if filename:
+                    self.output_file.set(filename)
+            self.root.update_idletasks()
+        except Exception as e:
+            messagebox.showerror("错误", f"选择文件/目录失败: {str(e)}")
+    
+    def log(self, message, log_type="info"):
+        """添加日志消息（带颜色前缀）"""
+        try:
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            
+            # 根据类型添加颜色前缀
+            if log_type == "error":
+                prefix = f"[ERROR]"
+                color_tag = "error"
+            elif log_type == "success":
+                prefix = f"[SUCCESS]"
+                color_tag = "success"
+            elif log_type == "warning":
+                prefix = f"[WARNING]"
+                color_tag = "warning"
+            elif log_type == "info":
+                prefix = f"[INFO]"
+                color_tag = "info"
+            else:
+                prefix = ""
+                color_tag = "info"
+            
+            log_message = f"{timestamp} - {prefix} {message}\n"
+            
+            # 配置标签颜色
+            self.log_text.tag_config("error", foreground=self.error_color)
+            self.log_text.tag_config("success", foreground=self.success_color)
+            self.log_text.tag_config("warning", foreground="#F59E0B")
+            self.log_text.tag_config("info", foreground=self.text_primary)
+            
+            # 插入文本并应用颜色
+            start_pos = self.log_text.index("end-1c")
+            self.log_text.insert("end", log_message)
+            end_pos = self.log_text.index("end-1c")
+            
+            # 应用颜色标签
+            if prefix:
+                # 只对前缀部分应用颜色
+                prefix_start = f"{start_pos.split('.')[0]}.{int(start_pos.split('.')[1]) + len(timestamp) + 3}"
+                prefix_end = f"{prefix_start.split('.')[0]}.{int(prefix_start.split('.')[1]) + len(prefix)}"
+                self.log_text.tag_add(color_tag, prefix_start, prefix_end)
+            
+            # 优化：只在必要时滚动到底部，减少更新频率
+            should_scroll = True
+            try:
+                # 检查是否已经接近底部（在最后 3 行内）
+                last_line = self.log_text.index("end-1c")
+                last_line_num = int(last_line.split('.')[0])
+                visible_start = self.log_text.index("@0,0")
+                visible_end = self.log_text.index("@0,{}".format(self.log_text.winfo_height()))
+                visible_start_num = int(visible_start.split('.')[0])
+                visible_end_num = int(visible_end.split('.')[0])
+                
+                # 如果用户已经滚动到顶部或中间，不要自动滚动到底部
+                if visible_end_num < last_line_num - 3:
+                    should_scroll = False
+            except:
+                pass
+            
+            if should_scroll:
+                self.log_text.see("end")
+            
+            self._log_count += 1
+            
+            # 限制日志长度
+            if self._log_count > 1000:
+                self.log_text.delete(1.0, "100.0")
+                self._log_count = 900
+            
+            # 优化：减少 update_idletasks 调用频率
+            if self._log_count % 5 == 0:  # 每 5 条日志才更新一次
+                self.root.update_idletasks()
+        except Exception:
+            pass
+    
+    def clear_logs(self):
+        """清空日志"""
+        try:
+            self.log_text.delete(1.0, "end")
+            self._log_count = 0
+            self.log("日志已清空", "info")
+        except Exception:
+            pass
+    
+    def generate_logs(self):
+        """生成日志的主函数"""
+        try:
+            self.generate_btn.configure(state="disabled")
+            thread = threading.Thread(target=self._run_git2logs_direct)
+            thread.daemon = True
+            thread.start()
+        except Exception as e:
+            self.log(f"启动生成任务失败: {str(e)}", "error")
+            self.generate_btn.configure(state="normal")
+    
+    def _run_git2logs_direct(self):
+        """在后台线程中执行git2logs"""
+        try:
+            from datetime import datetime
+            
+            from git2logs import (
+                create_gitlab_client, scan_all_projects, get_commits_by_author,
+                group_commits_by_date, generate_markdown_log, generate_multi_project_markdown,
+                generate_daily_report, generate_statistics_report, generate_all_reports,
+                analyze_with_ai, generate_ai_analysis_report, generate_local_analysis_report,
+                extract_gitlab_url, parse_project_identifier
+            )
+            import logging
+            
+            # 重定向日志输出到 GUI
+            class GUILogHandler(logging.Handler):
+                def __init__(self, gui_log_func):
+                    super().__init__()
+                    self.gui_log_func = gui_log_func
+                
+                def emit(self, record):
+                    try:
+                        msg = self.format(record)
+                        log_type = "error" if record.levelno >= logging.ERROR else "warning" if record.levelno >= logging.WARNING else "info"
+                        self.gui_log_func(msg, log_type)
+                    except Exception:
+                        pass
+            
+            gui_handler = GUILogHandler(self.log)
+            gui_handler.setLevel(logging.INFO)
+            formatter = logging.Formatter('%(levelname)s - %(message)s')
+            gui_handler.setFormatter(formatter)
+            
+            root_logger = logging.getLogger()
+            root_logger.addHandler(gui_handler)
+            root_logger.setLevel(logging.INFO)
+            
+            self.log("=" * 60, "info")
+            self.log("开始生成日志...", "info")
+            
+            # 获取配置
+            gitlab_url = self.gitlab_url.get().strip()
+            token = self.token.get().strip()
+            author = self.author.get().strip()
+            repo = self.repo.get().strip()
+            branch = self.branch.get().strip() if self.branch.get().strip() else None
+            
+            # 检查占位符
+            placeholder_text = "https://gitlab.com 或 http://gitlab.yourcompany.com"
+            if gitlab_url == placeholder_text:
+                gitlab_url = ""
+            
+            # 验证必要参数
+            if not gitlab_url or not token or not author:
+                self.log("错误: 请填写GitLab URL、访问令牌和提交者", "error")
+                self.root.after(0, lambda: messagebox.showerror("错误", "请填写GitLab URL、访问令牌和提交者"))
+                self.root.after(0, lambda: self.generate_btn.configure(state="normal"))
+                return
+            
+            # 日期处理
+            since_date = None
+            until_date = None
+            if not self.use_today.get():
+                since_date = self.since_date.get().strip()
+                until_date = self.until_date.get().strip()
+                if not since_date or not until_date:
+                    self.log("错误: 请填写起始日期和结束日期", "error")
+                    self.root.after(0, lambda: messagebox.showerror("错误", "请填写起始日期和结束日期"))
+                    self.root.after(0, lambda: self.generate_btn.configure(state="normal"))
+                    return
+            
+            # 创建GitLab客户端
+            self.log(f"正在连接到 GitLab: {gitlab_url}", "info")
+            gl = create_gitlab_client(gitlab_url, token)
+            
+            # 获取提交记录
+            all_results = {}
+            
+            if self.scan_all.get() or not repo:
+                self.log("正在扫描所有项目...", "info")
+                all_results = scan_all_projects(
+                    gl, author,
+                    since_date=since_date,
+                    until_date=until_date,
+                    branch=branch
+                )
+                self.log(f"扫描完成，共在 {len(all_results)} 个项目中找到提交记录", "success")
+            else:
+                extracted_url = extract_gitlab_url(repo)
+                if extracted_url:
+                    gitlab_url = extracted_url
+                    self.log(f"从仓库 URL 提取 GitLab 实例: {gitlab_url}", "info")
+                    gl = create_gitlab_client(gitlab_url, token)
+                
+                project_identifier = parse_project_identifier(repo)
+                self.log(f"正在获取项目: {project_identifier}", "info")
+                
+                try:
+                    project = gl.projects.get(project_identifier)
+                    commits = get_commits_by_author(
+                        project, author,
+                        since_date=since_date,
+                        until_date=until_date,
+                        branch=branch
+                    )
+                    if commits:
+                        all_results[project_identifier] = {
+                            'project': project,
+                            'commits': commits
+                        }
+                        self.log(f"找到 {len(commits)} 条提交记录", "success")
+                except Exception as e:
+                    self.log(f"获取项目失败: {str(e)}", "error")
+            
+            if not all_results:
+                self.log("未找到任何提交记录", "warning")
+                self.root.after(0, lambda: messagebox.showwarning("提示", "未找到任何提交记录"))
+                self.root.after(0, lambda: self.generate_btn.configure(state="normal"))
+                return
+            
+            # 确定输出路径
+            output_path = self.output_file.get().strip()
+            if not output_path:
+                output_path = os.getcwd()
+                self.log(f"未指定输出路径，使用当前目录: {output_path}", "info")
+            
+            # 根据输出格式生成报告
+            output_format = self.output_format.get()
+            self.log(f"输出格式: {output_format}", "info")
+            
+            generated_files = {}
+            
+            if output_format == "statistics":
+                self.log("正在生成统计报告...", "info")
+                report_content = generate_statistics_report(
+                    all_results, author,
+                    since_date=since_date, until_date=until_date
+                )
+                
+                if os.path.isdir(output_path):
+                    date_prefix = since_date if since_date and until_date and since_date == until_date else datetime.now().strftime('%Y-%m-%d')
+                    output_file = os.path.join(output_path, f"{date_prefix}_statistics.md")
+                else:
+                    output_file = output_path
+                
+                with open(output_file, 'w', encoding='utf-8') as f:
+                    f.write(report_content)
+                
+                generated_files['statistics'] = output_file
+                self.log(f"统计报告已保存: {output_file}", "success")
+                self.log("提示: 统计报告包含本地多维度评价，AI分析需要手动触发", "info")
+                
+                if self.ai_enabled.get() and self.ai_api_key.get().strip():
+                    self._pending_ai_data = {
+                        'all_results': all_results,
+                        'author': author,
+                        'output_dir': os.path.dirname(output_file),
+                        'since_date': since_date,
+                        'until_date': until_date,
+                        'generated_files': generated_files
+                    }
+                    self.log("数据已保存，可以点击'执行AI分析'按钮进行AI分析", "info")
+            elif output_format == "all":
+                self.log("正在批量生成所有格式...", "info")
+                generated_files = generate_all_reports(
+                    all_results, author, output_path,
+                    since_date=since_date, until_date=until_date
+                )
+                self.log(f"批量生成完成，共生成 {len(generated_files)} 个文件", "success")
+                for file_type, file_path in generated_files.items():
+                    self.log(f"  - {file_type}: {file_path}", "info")
+            else:
+                self.log(f"正在生成 {output_format} 格式...", "info")
+                if output_format == "commits":
+                    if len(all_results) == 1:
+                        report_content = generate_markdown_log(list(all_results.values())[0]['commits'])
+                    else:
+                        report_content = generate_multi_project_markdown(all_results)
+                elif output_format == "daily_report":
+                    report_content = generate_daily_report(
+                        all_results, author,
+                        since_date=since_date, until_date=until_date
+                    )
+                else:
+                    self.log(f"暂不支持 {output_format} 格式的直接生成", "error")
+                    self.root.after(0, lambda: self.generate_btn.configure(state="normal"))
+                    return
+                
+                if os.path.isdir(output_path):
+                    date_prefix = since_date if since_date and until_date and since_date == until_date else datetime.now().strftime('%Y-%m-%d')
+                    output_file = os.path.join(output_path, f"{date_prefix}_{output_format}.md")
+                else:
+                    output_file = output_path
+                
+                with open(output_file, 'w', encoding='utf-8') as f:
+                    f.write(report_content)
+                
+                generated_files[output_format] = output_file
+                self.log(f"报告已保存: {output_file}", "success")
+            
+            self.log("=" * 60, "info")
+            self.log("生成完成！", "success")
+            
+            self.root.after(0, lambda: self.generate_btn.configure(state="normal"))
+            
+        except Exception as e:
+            self.log(f"生成失败: {str(e)}", "error")
+            import traceback
+            self.log(traceback.format_exc(), "error")
+            self.root.after(0, lambda: messagebox.showerror("错误", f"生成失败: {str(e)}"))
+            self.root.after(0, lambda: self.generate_btn.configure(state="normal"))
+    
+    def _manual_ai_analysis(self):
+        """手动触发AI分析"""
+        try:
+            if not self.ai_enabled.get() or not self.ai_api_key.get().strip():
+                messagebox.showwarning("提示", "请先启用AI分析并配置API Key")
+                return
+            
+            if self._pending_ai_data:
+                result = messagebox.askyesno(
+                    "AI分析",
+                    "检测到当前会话的数据，是否使用当前会话的数据进行分析？\n\n"
+                    "选择'是'：使用当前会话的数据\n"
+                    "选择'否'：选择已生成的报告文件",
+                    icon='question'
+                )
+                if result:
+                    self.root.after(0, self._perform_ai_analysis)
+                    return
+            
+            report_file = filedialog.askopenfilename(
+                title="选择报告文件（统计报告或日报）",
+                initialdir=self.output_file.get().strip() or os.getcwd(),
+                filetypes=[("Markdown文件", "*.md"), ("所有文件", "*.*")]
+            )
+            
+            if not report_file:
+                return
+            
+            self.log("=" * 60, "info")
+            self.log(f"选择的报告文件: {report_file}", "info")
+            self.log("正在读取报告文件并发送给AI分析...", "info")
+            
+            thread = threading.Thread(target=self._analyze_report_file_direct, args=(report_file,))
+            thread.daemon = True
+            thread.start()
+            
+        except Exception as e:
+            self.log(f"启动AI分析失败: {str(e)}", "error")
+            messagebox.showerror("错误", f"启动AI分析失败: {str(e)}")
+    
+    def _analyze_report_file_direct(self, report_file):
+        """直接基于报告文件内容进行AI分析"""
+        import re
+        
+        try:
+            with open(report_file, 'r', encoding='utf-8') as f:
+                report_content = f.read()
+            
+            self.log(f"报告文件读取成功，文件大小: {len(report_content)} 字符", "success")
+            
+            author_match = re.search(r'\*\*提交者\*\*: (.+)', report_content)
+            author = author_match.group(1).strip() if author_match else "未知作者"
+            
+            date_range_match = re.search(r'\*\*统计时间范围\*\*: (.+?) 至 (.+?)(?:\n|$)', report_content)
+            if date_range_match:
+                since_date = date_range_match.group(1).strip()
+                until_date = date_range_match.group(2).strip()
+            else:
+                since_match = re.search(r'\*\*起始日期\*\*: (.+?)(?:\n|$)', report_content)
+                until_match = re.search(r'\*\*结束日期\*\*: (.+?)(?:\n|$)', report_content)
+                since_date = since_match.group(1).strip() if since_match else None
+                until_date = until_match.group(1).strip() if until_match else None
+            
+            if not self.ai_enabled.get() or not self.ai_api_key.get().strip():
+                self.log("错误: 请先配置AI服务并输入API Key", "error")
+                self.root.after(0, lambda: messagebox.showerror("错误", "请先配置AI服务并输入API Key"))
+                return
+            
+            ai_config = {
+                'service': self.ai_service.get(),
+                'api_key': self.ai_api_key.get().strip(),
+                'model': self.ai_model.get()
+            }
+            
+            self.log("", "info")
+            self.log("=" * 60, "info")
+            self.log("开始AI分析（基于报告文件内容）...", "info")
+            self.log(f"提示: AI分析可能需要30秒到2分钟，超时时间: 120秒", "info")
+            self.log(f"AI服务: {self.ai_service.get()}, 模型: {self.ai_model.get()}", "info")
+            self.log(f"作者: {author}", "info")
+            if since_date and until_date:
+                self.log(f"日期范围: {since_date} 至 {until_date}", "info")
+            
+            from ai_analysis import analyze_report_file
+            from git2logs import generate_ai_analysis_report
+            
+            analysis_result = analyze_report_file(report_content, ai_config, timeout=120)
+            
+            self.log("AI分析完成，正在生成报告...", "success")
+            
+            ai_report_content = generate_ai_analysis_report(
+                analysis_result, author,
+                since_date=since_date, until_date=until_date
+            )
+            
+            report_dir = os.path.dirname(report_file)
+            date_prefix = since_date if since_date and until_date and since_date == until_date else datetime.now().strftime('%Y-%m-%d')
+            ai_report_file = os.path.join(report_dir, f"{date_prefix}_ai_analysis.md")
+            
+            with open(ai_report_file, 'w', encoding='utf-8') as f:
+                f.write(ai_report_content)
+            
+            self.log(f"AI分析报告已保存: {ai_report_file}", "success")
+            self.log(f"文件大小: {len(ai_report_content)} 字符", "info")
+            self.log("提示: 文件名包含 '_ai_analysis' 表示这是AI分析报告", "info")
+            self.log("=" * 60, "info")
+            self.log("AI分析完成！", "success")
+            
+        except ImportError as e:
+            self.log(f"AI分析功能不可用: {str(e)}", "error")
+            self.log("提示: 请运行 'pip install openai anthropic google-generativeai' 安装AI服务库", "warning")
+            self.root.after(0, lambda: messagebox.showerror("错误", f"AI分析功能不可用: {str(e)}"))
+        except TimeoutError as e:
+            self.log(f"AI分析超时: {str(e)}", "error")
+            self.log("可能的原因:", "warning")
+            self.log("  1. 网络连接较慢或不稳定", "warning")
+            self.log("  2. AI服务响应较慢", "warning")
+            self.log("  3. 报告文件内容较大，处理时间较长", "warning")
+            self.log("建议: 请检查网络连接，或稍后重试", "info")
+            self.root.after(0, lambda: messagebox.showerror("错误", f"AI分析超时: {str(e)}"))
+        except ValueError as e:
+            error_msg = str(e)
+            self.log(f"AI分析失败（API密钥或配置问题）: {error_msg}", "error")
+            self.root.after(0, lambda: messagebox.showerror("错误", f"AI分析失败: {error_msg}"))
+        except ConnectionError as e:
+            error_msg = str(e)
+            self.log(f"AI分析失败（网络连接问题）: {error_msg}", "error")
+            self.root.after(0, lambda: messagebox.showerror("错误", f"网络连接失败: {error_msg}"))
+        except Exception as e:
+            self.log(f"AI分析失败: {str(e)}", "error")
+            import traceback
+            self.log(traceback.format_exc(), "error")
+            self.root.after(0, lambda: messagebox.showerror("错误", f"AI分析失败: {str(e)}"))
+        finally:
+            self.root.after(0, lambda: self.generate_btn.configure(state="normal"))
+    
+    def _perform_ai_analysis(self):
+        """执行AI分析（使用待处理的数据）"""
+        try:
+            if not self._pending_ai_data:
+                messagebox.showwarning("提示", "没有可用的数据进行分析")
+                return
+            
+            ai_config = {
+                'service': self.ai_service.get(),
+                'api_key': self.ai_api_key.get().strip(),
+                'model': self.ai_model.get()
+            }
+            
+            self.log("", "info")
+            self.log("=" * 60, "info")
+            self.log("开始AI分析...", "info")
+            self.log(f"提示: AI分析可能需要30秒到2分钟，超时时间: 120秒", "info")
+            self.log(f"AI服务: {self.ai_service.get()}, 模型: {self.ai_model.get()}", "info")
+            
+            thread = threading.Thread(target=self._perform_ai_analysis_thread, args=(ai_config,))
+            thread.daemon = True
+            thread.start()
+            
+        except Exception as e:
+            self.log(f"启动AI分析失败: {str(e)}", "error")
+            messagebox.showerror("错误", f"启动AI分析失败: {str(e)}")
+    
+    def _perform_ai_analysis_thread(self, ai_config):
+        """在后台线程中执行AI分析"""
+        try:
+            from git2logs import analyze_with_ai, generate_ai_analysis_report
+            
+            all_results = self._pending_ai_data['all_results']
+            author = self._pending_ai_data['author']
+            since_date = self._pending_ai_data.get('since_date')
+            until_date = self._pending_ai_data.get('until_date')
+            
+            analysis_result = analyze_with_ai(
+                all_results, author, ai_config,
+                since_date=since_date, until_date=until_date
+            )
+            
+            self.log("AI分析完成，正在生成报告...", "success")
+            
+            ai_report_content = generate_ai_analysis_report(
+                analysis_result, author,
+                since_date=since_date, until_date=until_date
+            )
+            
+            output_dir = self._pending_ai_data.get('output_dir', os.getcwd())
+            date_prefix = since_date if since_date and until_date and since_date == until_date else datetime.now().strftime('%Y-%m-%d')
+            ai_report_file = os.path.join(output_dir, f"{date_prefix}_ai_analysis.md")
+            
+            with open(ai_report_file, 'w', encoding='utf-8') as f:
+                f.write(ai_report_content)
+            
+            self.log(f"AI分析报告已保存: {ai_report_file}", "success")
+            self.log("=" * 60, "info")
+            self.log("AI分析完成！", "success")
+            
+        except Exception as e:
+            self.log(f"AI分析失败: {str(e)}", "error")
+            import traceback
+            self.log(traceback.format_exc(), "error")
+            self.root.after(0, lambda: messagebox.showerror("错误", f"AI分析失败: {str(e)}"))
+        finally:
+            self.root.after(0, lambda: self.generate_btn.configure(state="normal"))
+    
+    def test_ai_connection(self):
+        """测试AI连接"""
+        try:
+            if not self.ai_api_key.get().strip():
+                self.test_status_label.configure(text="请先输入API Key", text_color=self.error_color)
+                return
+            
+            self.test_status_label.configure(text="测试中...", text_color=self.accent_color)
+            thread = threading.Thread(target=self._test_ai_connection_thread)
+            thread.daemon = True
+            thread.start()
+        except Exception as e:
+            self.test_status_label.configure(text=f"测试失败: {str(e)}", text_color=self.error_color)
+    
+    def _test_ai_connection_thread(self):
+        """在后台线程中测试AI连接"""
+        try:
+            from ai_analysis import analyze_with_ai
+            import google.generativeai as genai
+            from google.api_core import exceptions as google_exceptions
+            
+            service = self.ai_service.get()
+            api_key = self.ai_api_key.get().strip()
+            model = self.ai_model.get()
+            
+            if service == "gemini":
+                genai.configure(api_key=api_key)
+                models = genai.list_models()
+                available_models = []
+                for m in models:
+                    if 'embedding' not in m.name.lower():
+                        if hasattr(m, 'supported_generation_methods'):
+                            if 'generateContent' in m.supported_generation_methods:
+                                available_models.append(m.name.split('/')[-1])
+                        else:
+                            available_models.append(m.name.split('/')[-1])
+                
+                if model in available_models:
+                    self.root.after(0, lambda: self.test_status_label.configure(
+                        text=f"连接成功，模型 {model} 可用", text_color=self.success_color))
+                else:
+                    self.root.after(0, lambda: self.test_status_label.configure(
+                        text=f"连接成功，但模型 {model} 不可用\n可用模型: {','.join(available_models[:5])}", 
+                        text_color="#F59E0B"))
+            else:
+                self.root.after(0, lambda: self.test_status_label.configure(
+                    text="连接测试成功", text_color=self.success_color))
+                
+        except Exception as e:
+            error_msg = str(e)
+            if "401" in error_msg or "unauthorized" in error_msg.lower() or "invalid" in error_msg.lower():
+                self.root.after(0, lambda: self.test_status_label.configure(
+                    text="API密钥无效", text_color=self.error_color))
+            elif "connection" in error_msg.lower() or "network" in error_msg.lower():
+                self.root.after(0, lambda: self.test_status_label.configure(
+                    text="网络连接失败", text_color=self.error_color))
+            else:
+                self.root.after(0, lambda: self.test_status_label.configure(
+                    text=f"测试失败: {error_msg[:50]}", text_color=self.error_color))
+
+
+def main():
+    """主函数 - 修复启动问题"""
+    root = None
+    try:
+        if not CTK_AVAILABLE:
+            print("错误: 需要安装 CustomTkinter")
+            print("请运行: pip install customtkinter")
+            sys.exit(1)
+        
+        # 创建根窗口
+        root = ctk.CTk()
+        
+        # 创建应用实例
+        app = Git2LogsGUI(root)
+        
+        # 确保所有初始化完成
+        root.update_idletasks()
+        root.update()
+        
+        # 确保窗口在屏幕中央
+        root.update_idletasks()
+        width = root.winfo_width()
+        height = root.winfo_height()
+        x = (root.winfo_screenwidth() // 2) - (width // 2)
+        y = (root.winfo_screenheight() // 2) - (height // 2)
+        root.geometry(f'{width}x{height}+{x}+{y}')
+        
+        # 进入主循环
+        root.mainloop()
+        
+    except Exception as e:
+        import traceback
+        error_msg = f"程序启动失败: {str(e)}\n\n{traceback.format_exc()}"
+        print(error_msg)
+        try:
+            if root:
+                root.withdraw()
+            error_root = ctk.CTk()
+            error_root.withdraw()
+            messagebox.showerror("启动错误", error_msg)
+            error_root.destroy()
+        except:
+            pass
+        if root:
+            root.destroy()
+        raise
+
+if __name__ == '__main__':
+    main()

@@ -1,1 +1,5 @@
 python-gitlab>=4.0.0
+openai>=1.0.0
+anthropic>=0.18.0
+google-generativeai>=0.3.0
+customtkinter>=5.2.0

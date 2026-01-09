@@ -1,5 +1,50 @@
 # 更新日志
 
+## 2026-01-09 - CustomTkinter 现代化 UI 重构
+
+### 重大更新
+
+- **全新的 CustomTkinter 现代化界面** (`git2logs_gui_ctk.py`)
+  - 采用现代暗黑主题设计（#18181B 背景，#27272A 卡片）
+  - Segmented Control 风格的标签导航，完美对齐
+  - 全局圆角设计（8-10px），提升视觉体验
+  - 输入框焦点时边框变为科技蓝（#3B82F6）
+  - 优化的滚动性能，解决滑动到底部时的卡顿闪烁问题
+  - 日志区域使用等宽字体（JetBrains Mono），带颜色前缀（ERROR/SUCCESS/WARNING/INFO）
+
+- **性能优化**
+  - 使用原生 tkinter Canvas + Scrollbar 替代 CTkScrollableFrame，性能更优
+  - 添加防抖机制，减少不必要的界面更新
+  - 优化日志更新频率，减少卡顿
+  - 智能滚动：只在用户接近底部时自动滚动
+
+- **AI 分析功能增强**
+  - 支持基于本地报告文件的 AI 分析（无需重新获取 GitLab 数据）
+  - 改进的错误处理和超时机制
+  - 支持 OpenAI、Anthropic Claude、Google Gemini 三大 AI 服务
+  - 自动检测可用的 Gemini 模型
+
+- **代码统计和多维度评分**
+  - 代码行数统计（总行数、新增、删除、净增）
+  - 多维度评分系统（满分 100）：
+    - 勤奋度 (Diligence)：基于提交频率和活跃天数
+    - 稳定性 (Stability)：基于每月提交分布的离散程度
+    - 解决问题能力 (Problem Solving)：基于修复类提交占比
+    - 功能创新力 (Feature/Innovation)：基于新功能开发占比
+    - 多线作战能力 (Versatility)：基于同时维护的项目数量和跨度
+
+### 改进
+
+- 改进的 macOS 打包脚本，支持 CustomTkinter 依赖
+- 更好的错误提示和日志输出
+- 界面响应速度优化
+
+### 技术细节
+
+- 新增依赖：`customtkinter>=5.2.0`
+- 保持向后兼容：如果 CustomTkinter 未安装，自动回退到标准 tkinter 界面
+- 所有功能保持不变，仅界面升级
+
 ## 2025-12-13 - 图形界面和 HTML/图片格式支持
 
 ### 新增功能
