@@ -50,11 +50,11 @@ else
     ICON_PARAM="--icon=$ICON_FILE"
 fi
 
-# 使用 PyInstaller 打包
-echo "开始打包..."
+# 使用 PyInstaller 打包（使用 onedir 模式以提升启动速度）
+echo "开始打包（使用 onedir 模式以提升启动速度）..."
 $PYINSTALLER_CMD --name="MIZUKI-TOOLBOX" \
     --windowed \
-    --onefile \
+    --onedir \
     --add-data "git2logs.py:." \
     --add-data "ai_analysis.py:." \
     --add-data "generate_report_image.py:." \
@@ -80,7 +80,20 @@ $PYINSTALLER_CMD --name="MIZUKI-TOOLBOX" \
 # 检查是否成功
 if [ -d "dist" ]; then
     echo "✓ 打包成功！"
-    echo "可执行文件位置: dist/MIZUKI-TOOLBOX"
+    
+    # onedir 模式下，应用在 dist/MIZUKI-TOOLBOX.app 目录中
+    APP_DIR="dist/MIZUKI-TOOLBOX"
+    APP_BUNDLE="${APP_DIR}.app"
+    
+    if [ -d "$APP_BUNDLE" ]; then
+        echo "应用包位置: $APP_BUNDLE"
+        echo "提示: onedir 模式启动速度更快，因为不需要解压临时文件"
+    elif [ -d "$APP_DIR" ]; then
+        echo "应用目录位置: $APP_DIR"
+        echo "提示: 需要手动创建 .app 包，或直接运行 dist/MIZUKI-TOOLBOX/MIZUKI-TOOLBOX"
+    else
+        echo "警告: 未找到预期的应用目录"
+    fi
     
     # 创建 DMG（需要 hdiutil）
     if command -v hdiutil &> /dev/null; then
@@ -90,7 +103,17 @@ if [ -d "dist" ]; then
         
         # 创建临时目录
         TEMP_DIR=$(mktemp -d)
-        cp -R "dist/${APP_NAME}" "$TEMP_DIR/"
+        
+        # onedir 模式下，复制 .app 包或目录
+        if [ -d "$APP_BUNDLE" ]; then
+            cp -R "$APP_BUNDLE" "$TEMP_DIR/"
+        elif [ -d "$APP_DIR" ]; then
+            cp -R "$APP_DIR" "$TEMP_DIR/"
+        else
+            echo "错误: 未找到应用文件"
+            rm -rf "$TEMP_DIR"
+            exit 1
+        fi
         
         # 创建 DMG
         hdiutil create -volname "$APP_NAME" \

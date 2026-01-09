@@ -49,7 +49,7 @@ class Git2LogsGUI:
     def __init__(self, root):
         try:
             self.root = root
-            self.root.title("GitLab 提交日志生成工具")
+            self.root.title("MIZUKI-GITLAB工具箱")
             self.root.geometry("700x800")
             self.root.minsize(400, 700)
             self.root.resizable(True, True)  # 允许自由调整大小
@@ -75,28 +75,25 @@ class Git2LogsGUI:
             # 设置窗口背景
             self.root.configure(bg=self.bg_main)
             
-            # 创建主容器
+            # 创建主容器（立即显示）
             main_container = ctk.CTkFrame(root, fg_color=self.bg_main, corner_radius=0)
             main_container.pack(fill="both", expand=True, padx=0, pady=0)
             
-            # 标题区域
-            title_frame = ctk.CTkFrame(main_container, fg_color=self.bg_main, height=80, corner_radius=0)
+            # 标题区域（只显示副标题，主标题在窗口标题栏）
+            title_frame = ctk.CTkFrame(main_container, fg_color=self.bg_main, height=50, corner_radius=0)
             title_frame.pack(fill="x", padx=0, pady=0)
             title_frame.pack_propagate(False)
-            
-            title_label = ctk.CTkLabel(title_frame,
-                                     text="MIZUKI-GITLAB工具箱",
-                                     font=ctk.CTkFont(size=24, weight="bold"),
-                                     text_color=self.text_primary,
-                                     fg_color="transparent")
-            title_label.pack(pady=(20, 4))
             
             subtitle_label = ctk.CTkLabel(title_frame,
                                          text="轻松生成和管理您的代码提交报告",
                                          font=ctk.CTkFont(size=13),
                                          text_color=self.text_secondary,
                                          fg_color="transparent")
-            subtitle_label.pack()
+            subtitle_label.pack(pady=(15, 0))
+            
+            # 立即更新，显示标题
+            root.update_idletasks()
+            root.update()
             
             # 创建日志显示区域（放在最上方）
             self._create_log_area(main_container)
@@ -232,38 +229,44 @@ class Git2LogsGUI:
             # 优化：禁用画布自动更新以提高性能
             self.scroll_canvas.configure(highlightthickness=0)
             
-            # 立即更新窗口，显示基本界面
+            # 立即更新窗口，显示基本界面（标题、标签按钮、日志区域）
             root.update_idletasks()
             root.update()
             
             # 延迟创建标签页内容（使用 after 延迟执行，让窗口先显示）
             def delayed_init():
                 try:
-                    # 创建所有标签页内容
+                    # 创建所有标签页内容（分步创建，每步后更新界面）
                     self._create_tab1_gitlab_config()
                     root.update_idletasks()
+                    root.update()
                     
                     self._create_tab2_date_output()
                     root.update_idletasks()
+                    root.update()
                     
                     self._create_tab3_ai_analysis()
                     root.update_idletasks()
+                    root.update()
                     
                     # 创建底部操作按钮区域（添加到可滚动容器中）
                     self._create_bottom_actions()
                     root.update_idletasks()
+                    root.update()
                     
                     # 默认显示第一个标签页
                     self._switch_tab("GitLab配置")
                     
                     # 初始日志
-                    self.log("欢迎使用 GitLab 提交日志生成工具！", "info")
+                    self.log("欢迎使用 MIZUKI-GITLAB工具箱！", "info")
                     self.log("请填写参数后点击'生成日志'按钮。", "info")
                 except Exception as e:
+                    import traceback
                     self.log(f"初始化错误: {str(e)}", "error")
+                    self.log(traceback.format_exc(), "error")
             
-            # 延迟50ms执行，让窗口先显示出来
-            root.after(50, delayed_init)
+            # 延迟10ms执行，让窗口先显示出来（缩短延迟时间）
+            root.after(10, delayed_init)
             
         except Exception as e:
             import traceback
@@ -1754,7 +1757,7 @@ class Git2LogsGUI:
 
 
 def main():
-    """主函数 - 优化启动速度"""
+    """主函数 - 优化启动速度，立即显示窗口"""
     root = None
     try:
         if not CTK_AVAILABLE:
@@ -1769,27 +1772,37 @@ def main():
         root.minsize(400, 700)
         root.resizable(True, True)
         
+        # 设置窗口位置（在创建应用前）
+        width = 700
+        height = 800
+        x = (root.winfo_screenwidth() // 2) - (width // 2)
+        y = (root.winfo_screenheight() // 2) - (height // 2)
+        root.geometry(f'{width}x{height}+{x}+{y}')
+        
+        # 强制显示窗口（关键：确保窗口立即可见）
+        root.deiconify()
+        root.lift()
+        root.focus_force()
+        
         # 立即更新窗口，让用户看到界面正在加载
         root.update_idletasks()
         root.update()
         
-        # 设置窗口位置（在创建应用前）
-        root.update_idletasks()
-        width = root.winfo_width() or 700
-        height = root.winfo_height() or 800
-        x = (root.winfo_screenwidth() // 2) - (width // 2)
-        y = (root.winfo_screenheight() // 2) - (height // 2)
-        root.geometry(f'{width}x{height}+{x}+{y}')
-        root.update_idletasks()
-        
         # 创建应用实例（延迟加载非关键模块）
-        app = Git2LogsGUI(root)
+        # 使用 after 延迟创建，确保窗口先显示
+        def create_app():
+            try:
+                app = Git2LogsGUI(root)
+            except Exception as e:
+                import traceback
+                error_msg = f"界面初始化失败: {str(e)}\n\n{traceback.format_exc()}"
+                print(error_msg)
+                messagebox.showerror("初始化错误", error_msg)
         
-        # 确保所有初始化完成
-        root.update_idletasks()
-        root.update()
+        # 延迟1ms创建应用（几乎立即，但确保窗口先显示）
+        root.after(1, create_app)
         
-        # 进入主循环
+        # 立即进入主循环（窗口已显示）
         root.mainloop()
         
     except Exception as e:
