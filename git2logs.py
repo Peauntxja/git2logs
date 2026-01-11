@@ -12,6 +12,7 @@ from collections import defaultdict
 from urllib.parse import urlparse
 import logging
 import statistics
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 try:
     import gitlab  # pyright: ignore[reportMissingImports]
@@ -96,6 +97,84 @@ def extract_gitlab_url(repo_url):
         parsed = urlparse(repo_url)
         return f"{parsed.scheme}://{parsed.netloc}"
     return None
+
+
+def _should_skip_branch(branch_obj, since_date=None, until_date=None):
+    """
+    检查分支是否应该被跳过（基于最后提交时间）
+    
+    Args:
+        branch_obj: GitLab 分支对象
+        since_date: 起始日期（可选，格式：YYYY-MM-DD）
+        until_date: 结束日期（可选，格式：YYYY-MM-DD）
+    
+    Returns:
+        bool: True 表示应该跳过，False 表示应该查询
+    """
+    if not since_date and not until_date:
+        # 没有日期限制，不跳过
+        return False
+    
+    try:
+        # 获取分支的最后提交时间
+        commit = branch_obj.commit
+        if not commit:
+            return False
+        
+        commit_date_str = getattr(commit, 'committed_date', None)
+        if not commit_date_str:
+            return False
+        
+        # 解析提交日期
+        if isinstance(commit_date_str, str):
+            commit_date = datetime.fromisoformat(commit_date_str.replace('Z', '+00:00'))
+        else:
+            return False
+        
+        commit_date_only = commit_date.date()
+        
+        # 检查是否在日期范围内
+        if since_date:
+            since = datetime.strptime(since_date, '%Y-%m-%d').date()
+            if commit_date_only < since:
+                return True  # 最后提交时间早于起始日期，跳过
+        
+        if until_date:
+            until = datetime.strptime(until_date, '%Y-%m-%d').date()
+            if commit_date_only > until:
+                return True  # 最后提交时间晚于结束日期，跳过
+        
+        return False  # 在日期范围内，不跳过
+    except Exception:
+        # 如果检查失败，不跳过（保守策略）
+        return False
+
+
+def _get_priority_branches(branches):
+    """
+    获取优先查询的分支列表（常用分支优先）
+    
+    Args:
+        branches: 分支对象列表
+    
+    Returns:
+        tuple: (优先分支列表, 其他分支列表)
+    """
+    priority_names = ['main', 'master', 'dev', 'develop', 'development']
+    priority_branches = []
+    other_branches = []
+    
+    for branch in branches:
+        branch_name = branch.name.lower()
+        if branch_name in priority_names:
+            priority_branches.append(branch)
+        else:
+            other_branches.append(branch)
+    
+    # 按优先级排序
+    priority_branches.sort(key=lambda b: priority_names.index(b.name.lower()) if b.name.lower() in priority_names else 999)
+    
+    return priority_branches, other_branches
 
 
 def get_commits_by_author(project, author_name, since_date=None, until_date=None, branch=None):
@@ -239,7 +318,31 @@ def get_commits_by_author(project, author_name, since_date=None, until_date=None
         branches = project.branches.list(per_page=100)
         logger.info(f"找到 {len(branches)} 个分支，开始遍历查询...")
         
-        for idx, branch_obj in enumerate(branches, 1):
+        # 分支预过滤：跳过不在日期范围内的分支
+        filtered_branches = []
+        skipped_count = 0
+        for branch_obj in branches:
+            if _should_skip_branch(branch_obj, since_date, until_date):
+                skipped_count += 1
+                logger.debug(f"跳过分支 '{branch_obj.name}'（最后提交时间不在日期范围内）")
+            else:
+                filtered_branches.append(branch_obj)
+        
+        if skipped_count > 0:
+            logger.info(f"预过滤：跳过了 {skipped_count} 个不在日期范围内的分支，剩余 {len(filtered_branches)} 个分支需要查询")
+        
+        # 智能分支优先级：优先查询常用分支
+        priority_branches, other_branches = _get_priority_branches(filtered_branches)
+        if priority_branches:
+            logger.info(f"优先查询 {len(priority_branches)} 个常用分支: {[b.name for b in priority_branches]}")
+        
+        # 合并分支列表：优先分支在前
+        ordered_branches = priority_branches + other_branches
+        
+        # 用于跟踪是否在优先分支中找到了提交
+        found_in_priority = False
+        
+        for idx, branch_obj in enumerate(ordered_branches, 1):
             try:
                 branch_params = {
                     'author': author_name,
@@ -287,45 +390,7 @@ def get_commits_by_author(project, author_name, since_date=None, until_date=None
                                 marker = " ← 匹配" if is_target else ""
                                 logger.info(f"  提交 {dc_idx}: 作者='{dc_author}' 邮箱='{dc_email}' 日期={dc_date_str} (UTC日期={dc_date_local}){marker}")
                         else:
-                            logger.warning(f"调试：分支 '{branch_obj.name}' 在指定日期范围内（{since_date or '全部'} 至 {until_date or '全部'}）没有任何提交（不指定作者）")
-                            # 如果指定了日期范围但没有找到提交，再查询一次不限制日期的，看看最近有哪些提交
-                            if since_date or until_date:
-                                logger.info(f"调试：查询分支 '{branch_obj.name}' 最近的提交（不限制日期范围）：")
-                                try:
-                                    debug_params_no_date = {'ref_name': branch_obj.name, 'per_page': 10}
-                                    debug_commits_no_date = project.commits.list(**debug_params_no_date)
-                                    if debug_commits_no_date:
-                                        logger.info(f"  找到 {len(debug_commits_no_date)} 条最近的提交：")
-                                        for dc_idx, dc in enumerate(debug_commits_no_date[:5], 1):
-                                            dc_author = getattr(dc, 'author_name', 'N/A')
-                                            dc_email = getattr(dc, 'author_email', 'N/A')
-                                            dc_date = getattr(dc, 'committed_date', 'N/A')
-                                            # 格式化日期
-                                            if isinstance(dc_date, str):
-                                                try:
-                                                    from datetime import datetime
-                                                    dc_date_obj = datetime.fromisoformat(dc_date.replace('Z', '+00:00'))
-                                                    dc_date_str = dc_date_obj.strftime('%Y-%m-%d %H:%M:%S')
-                                                    dc_date_local = dc_date_obj.strftime('%Y-%m-%d')
-                                                except:
-                                                    dc_date_str = str(dc_date)
-                                                    dc_date_local = 'N/A'
-                                            else:
-                                                dc_date_str = str(dc_date)
-                                                dc_date_local = 'N/A'
-                                            # 检查是否是目标作者
-                                            is_target = False
-                                            if author_name.lower() in str(dc_author).lower() or author_name.lower() in str(dc_email).lower():
-                                                is_target = True
-                                            marker = " ← 匹配" if is_target else ""
-                                            logger.info(f"    提交 {dc_idx}: 作者='{dc_author}' 邮箱='{dc_email}' 日期={dc_date_str} (UTC日期={dc_date_local}){marker}")
-                                        logger.info(f"  提示：如果看到匹配的提交，请检查其 UTC 日期是否在查询范围内")
-                                    else:
-                                        logger.warning(f"  该分支没有任何提交记录")
-                                except Exception as e:
-                                    logger.debug(f"查询最近提交失败: {e}")
-                            else:
-                                logger.warning(f"提示：如果确定有提交，可能是时区问题。GitLab 使用 UTC 时间，请检查提交的实际 UTC 日期")
+                            logger.debug(f"调试：分支 '{branch_obj.name}' 在指定日期范围内（{since_date or '全部'} 至 {until_date or '全部'}）没有任何提交（不指定作者）")
                     except Exception as e:
                         logger.warning(f"调试查询失败: {e}")
                 
@@ -383,11 +448,14 @@ def get_commits_by_author(project, author_name, since_date=None, until_date=None
                     branch_page += 1
                 
                 if branch_commits:
-                    logger.info(f"[{idx}/{len(branches)}] 分支 '{branch_obj.name}': 找到 {len(branch_commits)} 条提交")
+                    logger.info(f"[{idx}/{len(ordered_branches)}] 分支 '{branch_obj.name}': 找到 {len(branch_commits)} 条提交")
                     all_commits.extend(branch_commits)
+                    # 如果在优先分支中找到提交，标记一下（但不跳过其他分支，确保不遗漏）
+                    if branch_obj in priority_branches:
+                        found_in_priority = True
                 else:
                     # 调试：如果没找到提交，记录一下（仅在调试模式下）
-                    logger.debug(f"[{idx}/{len(branches)}] 分支 '{branch_obj.name}': 未找到提交")
+                    logger.debug(f"[{idx}/{len(ordered_branches)}] 分支 '{branch_obj.name}': 未找到提交")
             except Exception as e:
                 # 忽略权限不足等错误
                 logger.debug(f"查询分支 '{branch_obj.name}' 时出错: {str(e)}")
@@ -401,7 +469,7 @@ def get_commits_by_author(project, author_name, since_date=None, until_date=None
                 seen_ids.add(commit.id)
                 unique_commits.append(commit)
         
-        logger.info(f"共获取到 {len(unique_commits)} 条提交记录（遍历了 {len(branches)} 个分支）")
+        logger.info(f"共获取到 {len(unique_commits)} 条提交记录（遍历了 {len(ordered_branches)} 个分支，跳过了 {skipped_count} 个不在日期范围内的分支）")
         return unique_commits
     
     # 添加日期范围
@@ -512,7 +580,7 @@ def get_all_projects(gl, owned=False, membership=False):
         raise
 
 
-def scan_all_projects(gl, author_name, since_date=None, until_date=None, branch=None):
+def scan_all_projects(gl, author_name, since_date=None, until_date=None, branch=None, max_workers=10):
     """
     扫描所有项目，查找指定提交者的提交
     
@@ -522,6 +590,7 @@ def scan_all_projects(gl, author_name, since_date=None, until_date=None, branch=
         since_date: 起始日期（可选）
         until_date: 结束日期（可选）
         branch: 分支名称（可选）
+        max_workers: 最大并发线程数（默认：10）
     
     Returns:
         dict: 按项目分组的提交字典，格式：{project_path: {'project': project, 'commits': commits}}
@@ -534,10 +603,10 @@ def scan_all_projects(gl, author_name, since_date=None, until_date=None, branch=
     results = {}
     total_commits = 0
     
-    for idx, project in enumerate(projects, 1):
+    # 使用线程池并行处理项目
+    def process_project(project):
+        """处理单个项目的函数"""
         project_path = project.path_with_namespace
-        logger.info(f"[{idx}/{len(projects)}] 正在扫描项目: {project_path}")
-        
         try:
             # 获取该项目的提交
             commits = get_commits_by_author(
@@ -549,14 +618,13 @@ def scan_all_projects(gl, author_name, since_date=None, until_date=None, branch=
             )
             
             if commits:
-                results[project_path] = {
+                return {
+                    'project_path': project_path,
                     'project': project,
-                    'commits': commits
+                    'commits': commits,
+                    'count': len(commits)
                 }
-                total_commits += len(commits)
-                logger.info(f"  ✓ 找到 {len(commits)} 条提交")
-            # 不输出未找到提交的信息，减少日志噪音
-        
+            return None
         except Exception as e:
             # 只记录重要错误，忽略权限不足等常见错误
             error_msg = str(e)
@@ -564,7 +632,33 @@ def scan_all_projects(gl, author_name, since_date=None, until_date=None, branch=
                 logger.debug(f"  跳过项目 {project_path}（无权限或不存在）")
             else:
                 logger.warning(f"  扫描项目 {project_path} 时出错: {error_msg}")
-            continue
+            return None
+    
+    # 并行处理项目
+    completed = 0
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # 提交所有任务
+        future_to_project = {executor.submit(process_project, project): project for project in projects}
+        
+        # 处理完成的任务
+        for future in as_completed(future_to_project):
+            completed += 1
+            project = future_to_project[future]
+            project_path = project.path_with_namespace
+            
+            try:
+                result = future.result()
+                if result:
+                    results[result['project_path']] = {
+                        'project': result['project'],
+                        'commits': result['commits']
+                    }
+                    total_commits += result['count']
+                    logger.info(f"[{completed}/{len(projects)}] ✓ {project_path}: 找到 {result['count']} 条提交")
+                else:
+                    logger.debug(f"[{completed}/{len(projects)}] {project_path}: 未找到提交")
+            except Exception as e:
+                logger.warning(f"[{completed}/{len(projects)}] {project_path}: 处理失败: {str(e)}")
     
     logger.info(f"扫描完成，共在 {len(results)} 个项目中找到 {total_commits} 条提交")
     return results

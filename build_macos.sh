@@ -66,6 +66,7 @@ $PYINSTALLER_CMD --name="MIZUKI-TOOLBOX" \
     --hidden-import=tkinter.messagebox \
     --hidden-import=tkinter.filedialog \
     --hidden-import=statistics \
+    --hidden-import=concurrent.futures \
     --hidden-import=openai \
     --hidden-import=anthropic \
     --hidden-import=google.generativeai \
