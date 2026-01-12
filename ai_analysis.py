@@ -213,29 +213,59 @@ class BaseAIService(ABC):
 
 
 # ============================================================================
-# OpenAI 服务实现
+# OpenAI 兼容服务基类（支持 OpenAI、豆包、DeepSeek 等）
 # ============================================================================
 
-class OpenAIService(BaseAIService):
-    """OpenAI AI服务"""
-    
-    def _get_default_model(self) -> str:
-        return "gpt-4o-mini"
-    
+class OpenAICompatibleService(BaseAIService):
+    """OpenAI 兼容 API 的通用基类
+
+    适用于所有兼容 OpenAI API 格式的服务，包括：
+    - OpenAI 官方
+    - 豆包 (Doubao)
+    - DeepSeek
+    - 其他兼容 OpenAI API 的服务
+    """
+
+    def _get_base_url(self) -> Optional[str]:
+        """返回 API base_url（子类可重写）
+
+        Returns:
+            Optional[str]: base_url，如果为 None 则使用 OpenAI 默认值
+        """
+        return None
+
+    def _get_json_mode_models(self) -> List[str]:
+        """返回支持 JSON 模式的模型列表（子类可重写）
+
+        Returns:
+            List[str]: 支持 JSON 模式的模型名称列表
+        """
+        return []
+
+    def _get_service_name(self) -> str:
+        """返回服务名称（用于错误消息）"""
+        return self.__class__.__name__.replace('Service', '')
+
     def _make_api_call(self, prompt: str, system_message: str) -> str:
         import openai
         from openai import APIConnectionError, APIError, AuthenticationError, RateLimitError
-        
-        client = openai.OpenAI(
-            api_key=self.api_key,
-            timeout=self.timeout,
-            max_retries=2
-        )
-        
-        # 检查模型是否支持 JSON 模式
-        json_mode_models = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo']
-        use_json_mode = any(m in self.model.lower() for m in json_mode_models)
-        
+
+        # 构建客户端参数
+        client_args = {
+            'api_key': self.api_key,
+            'timeout': self.timeout,
+            'max_retries': 2
+        }
+
+        # 如果有 base_url，添加到参数中
+        base_url = self._get_base_url()
+        if base_url:
+            client_args['base_url'] = base_url
+
+        # 创建客户端
+        client = openai.OpenAI(**client_args)
+
+        # 构建请求参数
         request_params = {
             "model": self.model,
             "messages": [
@@ -246,34 +276,65 @@ class OpenAIService(BaseAIService):
             "max_tokens": 4000,
             "top_p": 0.95,
         }
-        
-        if use_json_mode:
+
+        # 检查是否支持 JSON 模式
+        json_mode_models = self._get_json_mode_models()
+        if json_mode_models and any(m in self.model.lower() for m in json_mode_models):
             try:
                 request_params["response_format"] = {"type": "json_object"}
             except Exception:
-                pass
-        
+                pass  # 如果不支持就忽略
+
+        # 调用 API
         response = client.chat.completions.create(**request_params)
-        
+
+        # 检查响应
         if not response.choices or len(response.choices) == 0:
-            raise ValueError("OpenAI API 返回空响应")
-        
+            service_name = self._get_service_name()
+            raise ValueError(f"{service_name} API 返回空响应")
+
         return response.choices[0].message.content
-    
+
     def _handle_error(self, error: Exception) -> Exception:
         import openai
         from openai import APIConnectionError, APIError, AuthenticationError, RateLimitError
-        
+
+        service_name = self._get_service_name()
+        error_msg = str(error)
+
+        # 认证错误
         if isinstance(error, AuthenticationError):
-            return ValueError(f"API密钥无效或已过期。请检查您的OpenAI API Key是否正确。错误详情: {str(error)}")
+            return ValueError(f"API密钥无效或已过期。请检查您的{service_name} API Key是否正确。错误详情: {error_msg}")
+
+        # 网络连接错误
         elif isinstance(error, APIConnectionError):
-            return ConnectionError(f"网络连接失败。请检查您的网络连接。错误详情: {str(error)}")
+            return ConnectionError(f"网络连接失败。请检查您的网络连接。错误详情: {error_msg}")
+
+        # 频率限制错误
         elif isinstance(error, RateLimitError):
-            return ValueError(f"API调用频率超限。请稍后重试。错误详情: {str(error)}")
+            return ValueError(f"API调用频率超限。请稍后重试。错误详情: {error_msg}")
+
+        # 一般 API 错误
         elif isinstance(error, APIError):
-            return ValueError(f"OpenAI API错误: {str(error)}")
+            return ValueError(f"{service_name} API错误: {error_msg}")
+
+        # 其他错误，调用父类处理
         else:
             return super()._handle_error(error)
+
+
+# ============================================================================
+# OpenAI 服务实现
+# ============================================================================
+
+class OpenAIService(OpenAICompatibleService):
+    """OpenAI AI服务"""
+
+    def _get_default_model(self) -> str:
+        return "gpt-4o-mini"
+
+    def _get_json_mode_models(self) -> List[str]:
+        return ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo']
 
 
 # ============================================================================
@@ -410,125 +471,28 @@ class GeminiService(BaseAIService):
 # 豆包服务实现
 # ============================================================================
 
-class DoubaoService(BaseAIService):
+class DoubaoService(OpenAICompatibleService):
     """豆包AI服务（兼容OpenAI API）"""
-    
+
     def _get_default_model(self) -> str:
         return "doubao-pro-128k"
-    
-    def _make_api_call(self, prompt: str, system_message: str) -> str:
-        import openai
-        from openai import APIConnectionError, APIError, AuthenticationError, RateLimitError
-        
-        # 豆包兼容OpenAI API，使用不同的base_url
-        client = openai.OpenAI(
-            api_key=self.api_key,
-            base_url="https://ark.cn-beijing.volces.com/api/v3",
-            timeout=self.timeout,
-            max_retries=2
-        )
-        
-        request_params = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": 0.3,
-            "max_tokens": 4000,
-            "top_p": 0.95,
-        }
-        
-        # 尝试启用JSON模式（如果支持）
-        try:
-            request_params["response_format"] = {"type": "json_object"}
-        except Exception:
-            pass
-        
-        response = client.chat.completions.create(**request_params)
-        
-        if not response.choices or len(response.choices) == 0:
-            raise ValueError("豆包API 返回空响应")
-        
-        return response.choices[0].message.content
-    
-    def _handle_error(self, error: Exception) -> Exception:
-        import openai
-        from openai import APIConnectionError, APIError, AuthenticationError, RateLimitError
-        
-        if isinstance(error, AuthenticationError):
-            return ValueError(f"API密钥无效或已过期。请检查您的豆包API Key是否正确。错误详情: {str(error)}")
-        elif isinstance(error, APIConnectionError):
-            return ConnectionError(f"网络连接失败。请检查您的网络连接。错误详情: {str(error)}")
-        elif isinstance(error, RateLimitError):
-            return ValueError(f"API调用频率超限。请稍后重试。错误详情: {str(error)}")
-        elif isinstance(error, APIError):
-            return ValueError(f"豆包API错误: {str(error)}")
-        else:
-            return super()._handle_error(error)
+
+    def _get_base_url(self) -> Optional[str]:
+        return "https://ark.cn-beijing.volces.com/api/v3"
 
 
 # ============================================================================
 # DeepSeek 服务实现
 # ============================================================================
 
-class DeepSeekService(BaseAIService):
+class DeepSeekService(OpenAICompatibleService):
     """DeepSeek AI服务（兼容OpenAI API）"""
-    
+
     def _get_default_model(self) -> str:
         return "deepseek-chat"
-    
-    def _make_api_call(self, prompt: str, system_message: str) -> str:
-        import openai
-        from openai import APIConnectionError, APIError, AuthenticationError, RateLimitError
-        
-        # DeepSeek兼容OpenAI API，使用不同的base_url
-        # 注意：OpenAI SDK 会自动添加 /v1 路径，所以这里只需要基础URL
-        client = openai.OpenAI(
-            api_key=self.api_key,
-            base_url="https://api.deepseek.com/v1",
-            timeout=self.timeout,
-            max_retries=2
-        )
-        
-        request_params = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": 0.3,
-            "max_tokens": 4000,
-            "top_p": 0.95,
-        }
-        
-        # 尝试启用JSON模式（如果支持）
-        try:
-            request_params["response_format"] = {"type": "json_object"}
-        except Exception:
-            pass
-        
-        response = client.chat.completions.create(**request_params)
-        
-        if not response.choices or len(response.choices) == 0:
-            raise ValueError("DeepSeek API 返回空响应")
-        
-        return response.choices[0].message.content
-    
-    def _handle_error(self, error: Exception) -> Exception:
-        import openai
-        from openai import APIConnectionError, APIError, AuthenticationError, RateLimitError
-        
-        if isinstance(error, AuthenticationError):
-            return ValueError(f"API密钥无效或已过期。请检查您的DeepSeek API Key是否正确。错误详情: {str(error)}")
-        elif isinstance(error, APIConnectionError):
-            return ConnectionError(f"网络连接失败。请检查您的网络连接。错误详情: {str(error)}")
-        elif isinstance(error, RateLimitError):
-            return ValueError(f"API调用频率超限。请稍后重试。错误详情: {str(error)}")
-        elif isinstance(error, APIError):
-            return ValueError(f"DeepSeek API错误: {str(error)}")
-        else:
-            return super()._handle_error(error)
+
+    def _get_base_url(self) -> Optional[str]:
+        return "https://api.deepseek.com/v1"
 
 
 # ============================================================================

@@ -295,7 +295,8 @@ def parse_daily_report(file_path):
 
 def generate_html_report(data, output_file):
     """生成HTML格式的日报表格"""
-    html = f"""<!DOCTYPE html>
+    # 使用列表累积 HTML 片段，最后一次性 join，避免字符串重复拼接
+    html_parts = [f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -394,214 +395,225 @@ def generate_html_report(data, output_file):
             color: #666;
             margin-top: 5px;
         }}
-        .chart-container {{
-            margin-top: 20px;
+        .full-width {{
+            grid-column: 1 / -1;
+        }}
+        .pie-chart {{
+            display: flex;
+            justify-content: space-around;
+            margin-top: 15px;
+        }}
+        .pie-segment {{
             text-align: center;
+            padding: 20px;
+            border-radius: 10px;
+            flex: 1;
+            margin: 0 10px;
+        }}
+        .pie-segment.feat {{
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            color: white;
+        }}
+        .pie-segment.bug {{
+            background: linear-gradient(135deg, #eb3349 0%, #f45c43 100%);
+            color: white;
+        }}
+        .pie-segment div {{
+            font-size: 16px;
+            font-weight: bold;
         }}
         .bar-chart {{
             display: flex;
             align-items: flex-end;
             justify-content: space-around;
             height: 200px;
-            margin-top: 20px;
+            margin-top: 15px;
+            padding: 10px;
+            border-bottom: 2px solid #667eea;
         }}
         .bar {{
-            width: 80px;
-            background: linear-gradient(to top, #667eea, #764ba2);
+            flex: 1;
+            margin: 0 5px;
+            background: linear-gradient(180deg, #667eea 0%, #764ba2 100%);
             border-radius: 5px 5px 0 0;
             position: relative;
-            margin: 0 10px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            min-height: 30px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 5px;
+        }}
+        .bar-value {{
+            color: white;
+            font-weight: bold;
+            font-size: 14px;
         }}
         .bar-label {{
             position: absolute;
-            top: -25px;
-            left: 50%;
-            transform: translateX(-50%);
-            font-weight: bold;
-            color: #333;
-        }}
-        .bar-value {{
-            position: absolute;
             bottom: -25px;
-            left: 50%;
-            transform: translateX(-50%);
-            font-weight: bold;
-            color: #667eea;
-        }}
-        .full-width {{
-            grid-column: 1 / -1;
-        }}
-        .pie-chart {{
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            margin-top: 20px;
-        }}
-        .pie-segment {{
-            width: 150px;
-            height: 150px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: bold;
-            font-size: 18px;
-            margin: 0 10px;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
-        }}
-        .feat {{
-            background: linear-gradient(135deg, #4CAF50, #45a049);
-        }}
-        .bug {{
-            background: linear-gradient(135deg, #F44336, #d32f2f);
+            font-size: 12px;
+            color: #333;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
         }}
         .timeline {{
-            /* 移除高度限制，让所有内容都显示，方便截图 */
-            /* max-height: 400px; */
-            /* overflow-y: auto; */
+            max-height: 400px;
+            overflow-y: auto;
+            padding: 10px;
         }}
         .timeline-item {{
+            display: flex;
+            align-items: center;
             padding: 10px;
-            border-left: 3px solid #667eea;
-            margin-bottom: 10px;
-            background: #f8f9fa;
+            margin-bottom: 8px;
+            background: white;
             border-radius: 5px;
+            border-left: 4px solid #667eea;
         }}
-        .time {{
+        .timeline-item .time {{
             font-weight: bold;
+            margin-right: 15px;
             color: #667eea;
+            min-width: 50px;
         }}
-        .type {{
-            display: inline-block;
-            width: 25px;
-            text-align: center;
+        .timeline-item .type {{
+            font-size: 18px;
+            margin-right: 15px;
         }}
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>{data['date']} - MIZUKI 开发日报</h1>
-        
+        <h1>🎯 {data['title']}</h1>
+
+        <div class="card full-width">
+            <h2>📊 核心统计</h2>
+            <div class="stat-box">
+                <div class="stat-item">
+                    <div class="stat-number">{data['projects_count']}</div>
+                    <div class="stat-label">涉及项目</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number">{data['total_commits']}</div>
+                    <div class="stat-label">总提交数</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number">{data['active_days']}</div>
+                    <div class="stat-label">活跃天数</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number">{data['code_additions']}</div>
+                    <div class="stat-label">新增代码</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number">{data['code_deletions']}</div>
+                    <div class="stat-label">删除代码</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number">{data['code_net']}</div>
+                    <div class="stat-label">净增代码</div>
+                </div>
+            </div>
+        </div>
+
         <div class="grid">
             <div class="card">
-                <h2>📊 工作概览</h2>
-                <table>
-                    <tr>
-                        <th>项目</th>
-                        <th>数值</th>
-                    </tr>
-                    <tr>
-                        <td>涉及项目</td>
-                        <td><strong>{data['projects_count']} 个</strong></td>
-                    </tr>
-                    <tr>
-                        <td>总提交数</td>
-                        <td><strong>{data['commits_count']} 次</strong></td>
-                    </tr>
-                    <tr>
-                        <td>工作时间</td>
-                        <td><strong>{data['work_time']}</strong></td>
-                    </tr>
-                    <tr>
-                        <td>功能开发</td>
-                        <td><strong>{data['feat_count']} 次</strong></td>
-                    </tr>
-                    <tr>
-                        <td>Bug修复</td>
-                        <td><strong>{data['bug_count']} 次</strong></td>
-                    </tr>
-                </table>
-            </div>
-            
-            <div class="card">
-                <h2>📦 项目统计</h2>
+                <h2>💼 涉及项目</h2>
                 <table>
                     <tr>
                         <th>项目名称</th>
                         <th>项目路径</th>
                         <th>提交数</th>
                     </tr>
-"""
-    
-    for project in data['projects']:
-        html += f"""
-                    <tr>
+"""]
+
+    # 添加项目列表（使用列表推导式，避免循环中的字符串拼接）
+    html_parts.extend([
+        f"""                    <tr>
                         <td>{project['name']}</td>
                         <td>{project['path']}</td>
                         <td><strong>{project['commits']} 次</strong></td>
                     </tr>
 """
-    
-    html += """
+        for project in data['projects']
+    ])
+
+    html_parts.append(f"""
                 </table>
             </div>
-            
+
             <div class="card">
                 <h2>📋 工作类型分布</h2>
                 <div class="pie-chart">
                     <div class="pie-segment feat">
                         <div>
                             <div>功能开发</div>
-                            <div style="font-size: 24px;">{}</div>
+                            <div style="font-size: 24px;">{data['feat_count']}</div>
                         </div>
                     </div>
                     <div class="pie-segment bug">
                         <div>
                             <div>Bug修复</div>
-                            <div style="font-size: 24px;">{}</div>
+                            <div style="font-size: 24px;">{data['bug_count']}</div>
                         </div>
                     </div>
                 </div>
             </div>
-            
+
             <div class="card">
                 <h2>📈 项目提交数量对比</h2>
                 <div class="bar-chart">
-""".format(data['feat_count'], data['bug_count'])
-    
+""")
+
+    # 添加项目提交条形图（使用列表推导式）
     max_commits = max([p['commits'] for p in data['projects']]) if data['projects'] else 1
-    for project in data['projects']:
-        height = (project['commits'] / max_commits) * 150
-        html += f"""
-                    <div class="bar" style="height: {height}px;">
+    html_parts.extend([
+        f"""                    <div class="bar" style="height: {(project['commits'] / max_commits) * 150}px;">
                         <div class="bar-label">{project['name']}</div>
                         <div class="bar-value">{project['commits']}</div>
                     </div>
 """
-    
-    html += """
+        for project in data['projects']
+    ])
+
+    html_parts.append("""
                 </div>
             </div>
-            
+
             <div class="card full-width">
                 <h2>⏰ 工作时间线</h2>
                 <div class="timeline">
-"""
-    
-    for item in data['timeline']:  # 显示所有时间线条目
-        type_emoji = '✨' if item['type'] == '✨' else '🐛'
-        html += f"""
-                    <div class="timeline-item">
+""")
+
+    # 添加时间线条目（使用列表推导式）
+    html_parts.extend([
+        f"""                    <div class="timeline-item">
                         <span class="time">{item['time']}</span>
-                        <span class="type">{type_emoji}</span>
+                        <span class="type">{'✨' if item['type'] == '✨' else '🐛'}</span>
                         <span>{item['project']}</span>
                     </div>
 """
-    
-    html += """
+        for item in data['timeline']
+    ])
+
+    html_parts.append("""
                 </div>
             </div>
         </div>
     </div>
 </body>
 </html>
-"""
-    
+""")
+
+    # 一次性 join 所有 HTML 片段
+    html = ''.join(html_parts)
+
     with open(output_file, 'w', encoding='utf-8') as f:
         f.write(html)
-    
+
     print(f'HTML日报已生成: {output_file}')
 
 def html_to_image_chrome(html_file, output_file):

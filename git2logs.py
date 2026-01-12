@@ -14,6 +14,18 @@ import logging
 import statistics
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# 导入工具模块
+from utils.date_utils import (
+    parse_iso_date,
+    parse_simple_date,
+    safe_parse_commit_date,
+    format_date_chinese,
+    format_date_range,
+    get_date_range_days
+)
+from utils.api_utils import GitLabAPIParams, extract_email_from_author, extract_name_from_author
+from utils.patterns import FIX_KEYWORDS, FEAT_KEYWORDS, check_commit_type, classify_commit
+
 try:
     import gitlab  # pyright: ignore[reportMissingImports]
 except ImportError:
@@ -27,6 +39,64 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# 性能优化：是否使用并行API调用（可通过环境变量控制）
+USE_PARALLEL_API = os.getenv('GIT2LOGS_PARALLEL', 'true').lower() == 'true'
+MAX_PARALLEL_WORKERS = int(os.getenv('GIT2LOGS_MAX_WORKERS', '5'))
+
+
+def _query_branch_commits(project, branch_obj, author_name, since_date, until_date, per_page=100):
+    """
+    查询单个分支的提交记录（用于并行调用）
+
+    Args:
+        project: GitLab项目对象
+        branch_obj: 分支对象
+        author_name: 提交者名称
+        since_date: 开始日期
+        until_date: 结束日期
+        per_page: 每页数量
+
+    Returns:
+        tuple: (分支名称, 提交列表)
+    """
+    try:
+        from utils.api_utils import GitLabAPIParams
+
+        # 构建查询参数
+        params = GitLabAPIParams.build_commits_params(
+            author=author_name,
+            branch=branch_obj.name,
+            since_date=since_date,
+            until_date=until_date,
+            per_page=per_page
+        )
+
+        branch_commits = []
+        page = 1
+
+        while True:
+            params['page'] = page
+            page_commits = project.commits.list(**params)
+
+            if not page_commits:
+                break
+
+            branch_commits.extend(page_commits)
+
+            if len(page_commits) < per_page:
+                break
+
+            page += 1
+
+        if branch_commits:
+            logger.debug(f"✓ 分支 '{branch_obj.name}': {len(branch_commits)} 条提交")
+
+        return (branch_obj.name, branch_commits)
+
+    except Exception as e:
+        logger.debug(f"✗ 分支 '{branch_obj.name}' 查询失败: {str(e)}")
+        return (branch_obj.name, [])
 
 
 def create_gitlab_client(gitlab_url, token=None):
@@ -127,7 +197,7 @@ def _should_skip_branch(branch_obj, since_date=None, until_date=None):
         
         # 解析提交日期
         if isinstance(commit_date_str, str):
-            commit_date = datetime.fromisoformat(commit_date_str.replace('Z', '+00:00'))
+            commit_date = parse_iso_date(commit_date_str)
         else:
             return False
         
@@ -135,12 +205,12 @@ def _should_skip_branch(branch_obj, since_date=None, until_date=None):
         
         # 检查是否在日期范围内
         if since_date:
-            since = datetime.strptime(since_date, '%Y-%m-%d').date()
+            since = parse_simple_date(since_date).date()
             if commit_date_only < since:
                 return True  # 最后提交时间早于起始日期，跳过
         
         if until_date:
-            until = datetime.strptime(until_date, '%Y-%m-%d').date()
+            until = parse_simple_date(until_date).date()
             if commit_date_only > until:
                 return True  # 最后提交时间晚于结束日期，跳过
         
@@ -374,7 +444,7 @@ def get_commits_by_author(project, author_name, since_date=None, until_date=None
                                 if isinstance(dc_date, str):
                                     try:
                                         from datetime import datetime
-                                        dc_date_obj = datetime.fromisoformat(dc_date.replace('Z', '+00:00'))
+                                        dc_date_obj = parse_iso_date(dc_date)
                                         dc_date_str = dc_date_obj.strftime('%Y-%m-%d %H:%M:%S')
                                         dc_date_local = dc_date_obj.strftime('%Y-%m-%d')
                                     except:
@@ -520,7 +590,7 @@ def group_commits_by_date(commits):
         commit_date = commit.committed_date
         if isinstance(commit_date, str):
             # 解析 ISO 8601 格式日期
-            date_obj = datetime.fromisoformat(commit_date.replace('Z', '+00:00'))
+            date_obj = parse_iso_date(commit_date)
         else:
             date_obj = commit_date
         
@@ -694,7 +764,7 @@ def generate_markdown_log(grouped_commits, author_name, repo_name=None, project=
     # 按日期输出提交
     for date, commits in grouped_commits.items():
         # 日期标题
-        date_obj = datetime.strptime(date, '%Y-%m-%d')
+        date_obj = parse_simple_date(date)
         date_formatted = date_obj.strftime('%Y年%m月%d日')
         lines.append(f"## {date_formatted} ({date})\n")
         
@@ -731,7 +801,7 @@ def generate_markdown_log(grouped_commits, author_name, repo_name=None, project=
             # 提交时间
             commit_time = commit.committed_date
             if isinstance(commit_time, str):
-                time_obj = datetime.fromisoformat(commit_time.replace('Z', '+00:00'))
+                time_obj = parse_iso_date(commit_time)
             else:
                 time_obj = commit_time
             time_str = time_obj.strftime('%H:%M:%S')
@@ -808,7 +878,7 @@ def generate_multi_project_markdown(all_results, author_name, since_date=None, u
         for commit in commits:
             commit_date = commit.committed_date
             if isinstance(commit_date, str):
-                date_obj = datetime.fromisoformat(commit_date.replace('Z', '+00:00'))
+                date_obj = parse_iso_date(commit_date)
             else:
                 date_obj = commit_date
             date_str = date_obj.strftime('%Y-%m-%d')
@@ -825,7 +895,7 @@ def generate_multi_project_markdown(all_results, author_name, since_date=None, u
     # 按日期输出提交
     sorted_dates = sorted(all_commits_by_date.keys(), reverse=True)
     for date in sorted_dates:
-        date_obj = datetime.strptime(date, '%Y-%m-%d')
+        date_obj = parse_simple_date(date)
         date_formatted = date_obj.strftime('%Y年%m月%d日')
         lines.append(f"## {date_formatted} ({date})\n")
         
@@ -874,7 +944,7 @@ def generate_multi_project_markdown(all_results, author_name, since_date=None, u
                 
                 commit_time = commit.committed_date
                 if isinstance(commit_time, str):
-                    time_obj = datetime.fromisoformat(commit_time.replace('Z', '+00:00'))
+                    time_obj = parse_iso_date(commit_time)
                 else:
                     time_obj = commit_time
                 time_str = time_obj.strftime('%H:%M:%S')
@@ -1221,9 +1291,9 @@ def calculate_scores(all_results, since_date=None, until_date=None):
     projects_set = set()
     
     # 修复类关键词
-    fix_keywords = ['fix', 'bug', '修复', '报错', '解决', 'error', 'issue', 'bugfix', 'hotfix']
+    fix_keywords = FIX_KEYWORDS  # 从 utils.patterns 导入
     # 功能类关键词
-    feat_keywords = ['feat', 'add', '开发', '新增', 'feature', 'implement', '实现', '开发', '添加']
+    feat_keywords = FEAT_KEYWORDS  # 从 utils.patterns 导入
     
     fix_commits = 0
     feat_commits = 0
@@ -1238,7 +1308,7 @@ def calculate_scores(all_results, since_date=None, until_date=None):
             # 解析日期
             commit_date = commit.committed_date
             if isinstance(commit_date, str):
-                date_obj = datetime.fromisoformat(commit_date.replace('Z', '+00:00'))
+                date_obj = parse_iso_date(commit_date)
             else:
                 date_obj = commit_date
             date_str = date_obj.strftime('%Y-%m-%d')
@@ -1260,21 +1330,21 @@ def calculate_scores(all_results, since_date=None, until_date=None):
     # 确定日期范围
     if since_date and until_date:
         try:
-            start_date = datetime.strptime(since_date, '%Y-%m-%d')
-            end_date = datetime.strptime(until_date, '%Y-%m-%d')
+            start_date = parse_simple_date(since_date)
+            end_date = parse_simple_date(until_date)
         except ValueError:
             # 如果日期格式错误，使用实际提交的日期范围
             if all_dates:
                 sorted_dates = sorted(all_dates)
-                start_date = datetime.strptime(sorted_dates[0], '%Y-%m-%d')
-                end_date = datetime.strptime(sorted_dates[-1], '%Y-%m-%d')
+                start_date = parse_simple_date(sorted_dates[0])
+                end_date = parse_simple_date(sorted_dates[-1])
             else:
                 start_date = datetime.now()
                 end_date = datetime.now()
     elif all_dates:
         sorted_dates = sorted(all_dates)
-        start_date = datetime.strptime(sorted_dates[0], '%Y-%m-%d')
-        end_date = datetime.strptime(sorted_dates[-1], '%Y-%m-%d')
+        start_date = parse_simple_date(sorted_dates[0])
+        end_date = parse_simple_date(sorted_dates[-1])
     else:
         start_date = datetime.now()
         end_date = datetime.now()
@@ -1298,7 +1368,7 @@ def calculate_scores(all_results, since_date=None, until_date=None):
     for commit in all_commits:
         commit_date = commit.committed_date
         if isinstance(commit_date, str):
-            date_obj = datetime.fromisoformat(commit_date.replace('Z', '+00:00'))
+            date_obj = parse_iso_date(commit_date)
         else:
             date_obj = commit_date
         month_key = date_obj.strftime('%Y-%m')
@@ -1326,8 +1396,8 @@ def calculate_scores(all_results, since_date=None, until_date=None):
     # 如果每月都有提交，给予额外加分（最多10分）
     if since_date and until_date:
         try:
-            start = datetime.strptime(since_date, '%Y-%m-%d')
-            end = datetime.strptime(until_date, '%Y-%m-%d')
+            start = parse_simple_date(since_date)
+            end = parse_simple_date(until_date)
             expected_months = set()
             current = start.replace(day=1)
             while current <= end:
@@ -1874,7 +1944,7 @@ def analyze_with_ai(all_results, author_name, ai_config, since_date=None, until_
             # 收集日期
             commit_date = commit.committed_date
             if isinstance(commit_date, str):
-                date_obj = datetime.fromisoformat(commit_date.replace('Z', '+00:00'))
+                date_obj = parse_iso_date(commit_date)
             else:
                 date_obj = commit_date
             date_str = date_obj.strftime('%Y-%m-%d')
@@ -2191,7 +2261,7 @@ def generate_daily_report(all_results, author_name, since_date=None, until_date=
     else:
         report_date = datetime.now().strftime('%Y-%m-%d')
     
-    date_obj = datetime.strptime(report_date, '%Y-%m-%d')
+    date_obj = parse_simple_date(report_date)
     date_formatted = date_obj.strftime('%Y年%m月%d日')
     
     # 标题
@@ -2234,7 +2304,7 @@ def generate_daily_report(all_results, author_name, since_date=None, until_date=
             # 解析时间
             commit_time = commit.committed_date
             if isinstance(commit_time, str):
-                time_obj = datetime.fromisoformat(commit_time.replace('Z', '+00:00'))
+                time_obj = parse_iso_date(commit_time)
             else:
                 time_obj = commit_time
             
@@ -2390,7 +2460,7 @@ def generate_daily_report(all_results, author_name, since_date=None, until_date=
         for commit in result['commits']:
             commit_time = commit.committed_date
             if isinstance(commit_time, str):
-                time_obj = datetime.fromisoformat(commit_time.replace('Z', '+00:00'))
+                time_obj = parse_iso_date(commit_time)
             else:
                 time_obj = commit_time
             
