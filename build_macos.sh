@@ -55,6 +55,16 @@ echo "开始打包（使用 onedir 模式以提升启动速度）..."
 $PYINSTALLER_CMD --name="MIZUKI-TOOLBOX" \
     --windowed \
     --onedir \
+    --clean \
+    --noconfirm \
+    --exclude-module pandas \
+    --exclude-module IPython \
+    --exclude-module matplotlib \
+    --exclude-module PIL.ImageQt \
+    --exclude-module PIL.ImageShow \
+    --exclude-module PIL.ImageGrab \
+    --exclude-module PIL.ImageTransform \
+    --exclude-module PIL.ImageWin \
     --add-data "git2logs.py:." \
     --add-data "ai_analysis.py:." \
     --add-data "generate_report_image.py:." \

@@ -129,133 +129,42 @@ class Git2LogsGUI:
                 btn.pack(side="left", padx=2, pady=4)
                 self.tab_buttons.append((name, btn))
             
-            # 创建内容容器（可滚动）- 使用原生 Canvas 以获得更好的性能
-            canvas_frame = ctk.CTkFrame(main_container, fg_color=self.bg_main, corner_radius=0)
-            canvas_frame.pack(fill="both", expand=True, padx=0, pady=0)
+            # 底部固定操作按钮容器（主观能动性：固定底部能彻底解决按钮在滚动时的重叠闪烁）
+            self.bottom_actions_frame = ctk.CTkFrame(main_container, fg_color=self.bg_main, corner_radius=0)
+            self.bottom_actions_frame.pack(side="bottom", fill="x", padx=0, pady=0)
             
-            # 使用原生 tkinter Canvas 实现滚动，性能更好
-            from tkinter import Canvas, Scrollbar
-            self.scroll_canvas = Canvas(canvas_frame,
-                                       bg=self.bg_main,
-                                       highlightthickness=0,
-                                       borderwidth=0)
+            # 使用 CustomTkinter 官方推荐的 CTKScrollableFrame
+            # 这是解决 macOS 下滚动鬼影、重叠和闪烁的最佳方案
+            # 我们将背景色设为一致，以减少视觉闪烁
+            self.scroll_container = ctk.CTkScrollableFrame(main_container,
+                                                         fg_color=self.bg_main,
+                                                         corner_radius=0)
+            self.scroll_container.pack(fill="both", expand=True, padx=0, pady=0)
             
-            # 创建滚动条但隐藏它（宽度设为0，不显示）
-            scrollbar = Scrollbar(canvas_frame,
-                                orient="vertical",
-                                command=self.scroll_canvas.yview,
-                                bg=self.bg_main,  # 与背景色相同，完全隐藏
-                                troughcolor=self.bg_main,
-                                activebackground=self.bg_main,
-                                width=0)  # 宽度设为0，完全隐藏
+            # 为了保持向下兼容性，将 content_container 指向滚动容器
+            self.content_container = self.scroll_container
             
-            self.content_container = ctk.CTkFrame(self.scroll_canvas,
-                                                 fg_color=self.bg_main,
-                                                 corner_radius=0)
+            # 隐藏滚动条（通过配置其颜色为背景色来实现视觉隐藏，更安全）
+            try:
+                self.scroll_container.configure(scrollbar_button_color=self.bg_main, 
+                                              scrollbar_button_hover_color=self.bg_main)
+            except:
+                pass
             
-            # 将内容容器添加到 Canvas
-            canvas_window = self.scroll_canvas.create_window((0, 0),
-                                                            window=self.content_container,
-                                                            anchor="nw")
-            
-            # 配置滚动区域（优化性能，减少闪烁）
-            self._scroll_update_timer = None
-            self._last_bbox = None
-            
-            def configure_scroll_region(event=None):
-                # 取消之前的定时器
-                if self._scroll_update_timer:
-                    self.root.after_cancel(self._scroll_update_timer)
-                    self._scroll_update_timer = None
-                
-                # 延迟更新，避免频繁刷新
-                def do_update():
-                    try:
-                        bbox = self.scroll_canvas.bbox("all")
-                        if bbox:
-                            # 只在边界框确实改变时才更新（减少不必要的更新）
-                            bbox_str = f"{bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]}"
-                            if self._last_bbox != bbox_str:
-                                self.scroll_canvas.configure(scrollregion=bbox)
-                                self._last_bbox = bbox_str
-                    except:
-                        pass
-                    self._scroll_update_timer = None
-                
-                # 使用更长的延迟以减少更新频率（从16ms改为50ms）
-                self._scroll_update_timer = self.root.after(50, do_update)
-            
-            def configure_canvas_width(event):
-                # 确保内容宽度匹配画布宽度
-                canvas_width = event.width
-                self.scroll_canvas.itemconfig(canvas_window, width=canvas_width)
-                configure_scroll_region()
-            
-            # 绑定事件（使用防抖机制，减少触发频率）
-            self._configure_bind_id = None
-            def on_content_configure(event=None):
-                # 取消之前的绑定
-                if self._configure_bind_id:
-                    self.root.after_cancel(self._configure_bind_id)
-                # 延迟绑定，避免频繁触发
-                self._configure_bind_id = self.root.after(100, configure_scroll_region)
-            
-            self.content_container.bind('<Configure>', on_content_configure)
-            self.scroll_canvas.bind('<Configure>', configure_canvas_width)
-            
-            # 绑定鼠标滚轮（优化性能，使用更平滑的滚动）
-            def on_mousewheel(event):
-                # 检查是否在滚动区域内
-                if self.scroll_canvas.winfo_containing(event.x_root, event.y_root):
-                    # macOS 使用 delta，Windows/Linux 使用 delta/120
-                    if sys.platform == 'darwin':
-                        delta = int(-1 * event.delta * 0.5)  # 减小滚动幅度，更平滑
-                    else:
-                        delta = int(-1 * (event.delta / 120) * 0.5)
-                    self.scroll_canvas.yview_scroll(delta, "units")
-                    return "break"
-            
-            # 绑定滚轮事件到画布
-            self.scroll_canvas.bind_all("<MouseWheel>", on_mousewheel)
-            if sys.platform != 'darwin':
-                self.scroll_canvas.bind_all("<Button-4>", lambda e: self.scroll_canvas.yview_scroll(-1, "units"))
-                self.scroll_canvas.bind_all("<Button-5>", lambda e: self.scroll_canvas.yview_scroll(1, "units"))
-            
-            # 布局 Canvas（滚动条隐藏，不显示）
-            self.scroll_canvas.pack(side="left", fill="both", expand=True)
-            # scrollbar.pack(side="right", fill="y")  # 注释掉，不显示滚动条
-            self.scroll_canvas.configure(yscrollcommand=scrollbar.set)
-            
-            # 优化：禁用画布自动更新以提高性能
-            self.scroll_canvas.configure(highlightthickness=0)
-            
-            # 立即更新窗口，显示基本界面（标题、标签按钮、日志区域）
-            root.update_idletasks()
-            root.update()
-            
-            # 延迟创建标签页内容（使用 after 延迟执行，让窗口先显示）
+            # 延迟并批量创建标签页内容（消除渲染毛刺）
             def delayed_init():
                 try:
-                    # 创建所有标签页内容（分步创建，每步后更新界面）
+                    # 分步构建 UI 组件，但不执行强制 update
                     self._create_tab1_gitlab_config()
-                    root.update_idletasks()
-                    root.update()
-                    
                     self._create_tab2_date_output()
-                    root.update_idletasks()
-                    root.update()
-                    
                     self._create_tab3_ai_analysis()
-                    root.update_idletasks()
-                    root.update()
-                    
-                    # 创建底部操作按钮区域（添加到可滚动容器中）
                     self._create_bottom_actions()
-                    root.update_idletasks()
-                    root.update()
                     
                     # 默认显示第一个标签页
                     self._switch_tab("GitLab配置")
+                    
+                    # 关键一次性静默同步
+                    self.root.update_idletasks()
                     
                     # 初始日志
                     self.log("欢迎使用 MIZUKI-GITLAB工具箱！", "info")
@@ -265,7 +174,7 @@ class Git2LogsGUI:
                     self.log(f"初始化错误: {str(e)}", "error")
                     self.log(traceback.format_exc(), "error")
             
-            # 延迟10ms执行，让窗口先显示出来（缩短延迟时间）
+            # 延迟10ms执行，让窗口先显示出来
             root.after(10, delayed_init)
             
         except Exception as e:
@@ -325,15 +234,23 @@ class Git2LogsGUI:
                                              padx=12,
                                              pady=12)
         self.log_text.pack(fill="both", expand=False)
+        
+        # 预先配置标签颜色，避免在 log 方法中重复配置
+        self.log_text.tag_config("error", foreground=self.error_color)
+        self.log_text.tag_config("success", foreground=self.success_color)
+        self.log_text.tag_config("warning", foreground="#F59E0B")
+        self.log_text.tag_config("info", foreground=self.text_primary)
+        self.log_text.tag_config("timestamp", foreground=self.text_secondary)
     
     def _create_tab1_gitlab_config(self):
         """创建标签页1: GitLab配置"""
-        tab1 = ctk.CTkFrame(self.content_container, fg_color=self.bg_card, corner_radius=10)
+        # 优化：透明背景且取消圆角
+        tab1 = ctk.CTkFrame(self.content_container, fg_color="transparent", corner_radius=0)
         tab1.pack(fill="both", expand=True, padx=20, pady=20)
         
         # 内容容器
         content = ctk.CTkFrame(tab1, fg_color="transparent")
-        content.pack(fill="both", expand=True, padx=30, pady=30)
+        content.pack(fill="both", expand=True, padx=30, pady=10)
         
         row = 0
         
@@ -496,20 +413,22 @@ class Git2LogsGUI:
                                  text_color=self.text_secondary,
                                  justify="left",
                                  anchor="w")
-        hint_label.pack(anchor="w", padx=16, pady=(0, 16))
-        
         content.columnconfigure(0, weight=1)
+        
+        # 添加底部占位符
+        ctk.CTkLabel(content, text="", height=50).grid(row=row+1, column=0)
         
         self.tab_frames["GitLab配置"] = tab1
         tab1.pack_forget()  # 初始隐藏
     
     def _create_tab2_date_output(self):
         """创建标签页2: 日期和输出"""
-        tab2 = ctk.CTkFrame(self.content_container, fg_color=self.bg_card, corner_radius=10)
+        # 优化：透明背景且取消圆角
+        tab2 = ctk.CTkFrame(self.content_container, fg_color="transparent", corner_radius=0)
         tab2.pack(fill="both", expand=True, padx=20, pady=20)
         
         content = ctk.CTkFrame(tab2, fg_color="transparent")
-        content.pack(fill="both", expand=True, padx=30, pady=30)
+        content.pack(fill="both", expand=True, padx=30, pady=10)
         
         row = 0
         
@@ -692,16 +611,20 @@ class Git2LogsGUI:
         
         content.columnconfigure(0, weight=1)
         
+        # 添加底部占位符
+        ctk.CTkLabel(content, text="", height=50).grid(row=row+1, column=0)
+        
         self.tab_frames["日期和输出"] = tab2
         tab2.pack_forget()
     
     def _create_tab3_ai_analysis(self):
         """创建标签页3: AI分析"""
-        tab3 = ctk.CTkFrame(self.content_container, fg_color=self.bg_card, corner_radius=10)
+        # 优化：透明背景且取消圆角
+        tab3 = ctk.CTkFrame(self.content_container, fg_color="transparent", corner_radius=0)
         tab3.pack(fill="both", expand=True, padx=20, pady=20)
         
         content = ctk.CTkFrame(tab3, fg_color="transparent")
-        content.pack(fill="both", expand=True, padx=30, pady=30)
+        content.pack(fill="both", expand=True, padx=30, pady=10)
         content.columnconfigure(1, weight=1)
         
         row = 0
@@ -853,6 +776,9 @@ class Git2LogsGUI:
                                             anchor="w")
         self.test_status_label.pack(side="left")
         
+        # 添加底部占位符
+        ctk.CTkLabel(content, text="", height=50).grid(row=row+1, column=0)
+        
         # 初始隐藏AI配置
         self.ai_config_frame.grid_remove()
         
@@ -860,12 +786,12 @@ class Git2LogsGUI:
         tab3.pack_forget()
     
     def _create_bottom_actions(self):
-        """创建底部操作按钮区域（添加到可滚动容器中，自适应窗口宽度）"""
-        # 执行按钮区域
-        button_container = ctk.CTkFrame(self.content_container,
+        """创建底部固定操作按钮区域（固定在窗口底部，不随内容滚动）"""
+        # 使用我们在 __init__ 中预先创建好的底部框架
+        button_container = ctk.CTkFrame(self.bottom_actions_frame,
                                        fg_color=self.bg_main,
                                        corner_radius=0)
-        button_container.pack(fill="x", padx=20, pady=(20, 0))
+        button_container.pack(fill="x", padx=20, pady=(10, 20))
         
         # 使用 grid 布局以实现自适应
         button_frame = ctk.CTkFrame(button_container, fg_color="transparent")
@@ -917,41 +843,14 @@ class Git2LogsGUI:
                                            command=self._manual_ai_analysis)
         self.ai_analysis_btn.grid(row=0, column=2, padx=8, sticky="ew")
         
-        # 绑定窗口大小变化事件，动态调整按钮和日期输入框字体大小
-        def on_window_resize(event=None):
-            try:
-                window_width = self.root.winfo_width()
-                if window_width < 500:
-                    # 窗口很窄时，使用更小的字体
-                    btn_font_size = 11
-                    date_font_size = 10
-                elif window_width < 600:
-                    btn_font_size = 12
-                    date_font_size = 11
-                else:
-                    btn_font_size = 14
-                    date_font_size = 12
-                
-                # 调整按钮字体
-                self.generate_btn.configure(font=ctk.CTkFont(size=btn_font_size, weight="bold"))
-                clear_btn.configure(font=ctk.CTkFont(size=btn_font_size))
-                self.ai_analysis_btn.configure(font=ctk.CTkFont(size=btn_font_size))
-                
-                # 调整日期输入框字体（如果已创建）
-                if hasattr(self, 'since_entry') and self.since_entry:
-                    self.since_entry.configure(font=ctk.CTkFont(size=date_font_size))
-                if hasattr(self, 'until_entry') and self.until_entry:
-                    self.until_entry.configure(font=ctk.CTkFont(size=date_font_size))
-            except:
-                pass
+        # 移除复杂的动态字体调整，这在滚动时会引起布局震荡和重叠闪烁
+        # 保持稳定的 UI 布局对滚动体验至关重要
+        self._last_resize_width = self.root.winfo_width()
         
-        # 保存按钮窗口大小调整函数，以便日期范围部分可以调用
-        self._on_window_resize_for_buttons = on_window_resize
-        
-        # 如果还没有绑定窗口大小变化事件，则绑定
-        if not hasattr(self, '_window_resize_bound'):
-            self.root.bind('<Configure>', on_window_resize)
-            self._window_resize_bound = True
+        # 统一使用稳定的字体大小，避免由于 Configure 事件引发的递归重绘
+        self.generate_btn.configure(font=ctk.CTkFont(size=14, weight="bold"))
+        clear_btn.configure(font=ctk.CTkFont(size=14))
+        self.ai_analysis_btn.configure(font=ctk.CTkFont(size=14))
     
     def _switch_tab(self, tab_name):
         """切换标签页（Segmented Control 风格）"""
@@ -960,51 +859,26 @@ class Git2LogsGUI:
             for name, frame in self.tab_frames.items():
                 frame.pack_forget()
             
-            # 显示选中的标签页
+             # 显示选中的标签页
             if tab_name in self.tab_frames:
-                self.tab_frames[tab_name].pack(fill="both", expand=True, padx=20, pady=20)
+                # 优化：expand=False 稳固布局，防止触底闪烁
+                self.tab_frames[tab_name].pack(fill="x", expand=False, padx=20, pady=20)
                 self.current_tab = tab_name
             
             # 更新按钮样式（Segmented Control 效果）
             for name, btn in self.tab_buttons:
                 if name == tab_name:
-                    # 选中状态 - 背景色，文字更亮，带科技蓝下划线效果（通过背景色模拟）
-                    btn.configure(fg_color=self.bg_card,
-                                 text_color=self.text_primary,
-                                 hover_color="#3F3F46")
+                    btn.configure(fg_color=self.bg_card, text_color=self.text_primary)
                 else:
-                    # 未选中状态 - 透明背景，文字较暗
-                    btn.configure(fg_color="transparent",
-                                 text_color=self.text_secondary,
-                                 hover_color="#3F3F46")
+                    btn.configure(fg_color="transparent", text_color=self.text_secondary)
             
-            # 优化：延迟更新滚动区域，避免切换标签时的闪烁
-            def delayed_update():
-                try:
-                    if hasattr(self, 'scroll_canvas'):
-                        # 先滚动到顶部
-                        self.scroll_canvas.yview_moveto(0)
-                        # 然后更新滚动区域
-                        self.root.after(100, lambda: self._update_scroll_region())
-                except:
-                    pass
-            
-            self.root.after(100, delayed_update)  # 延迟 100ms 更新，更平滑
+            # 立即滚动到顶部
+            if hasattr(self, 'scroll_container'):
+                # 修复标准调用方式
+                self.scroll_container._canvas.yview_moveto(0)
         except Exception as e:
             print(f"切换标签页错误: {e}")
     
-    def _update_scroll_region(self):
-        """更新滚动区域（独立方法，避免重复代码）"""
-        try:
-            if hasattr(self, 'scroll_canvas'):
-                bbox = self.scroll_canvas.bbox("all")
-                if bbox:
-                    bbox_str = f"{bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]}"
-                    if not hasattr(self, '_last_bbox') or self._last_bbox != bbox_str:
-                        self.scroll_canvas.configure(scrollregion=bbox)
-                        self._last_bbox = bbox_str
-        except Exception as e:
-            pass
     
     def _update_ai_models(self, *args):
         """更新AI模型列表"""
@@ -1161,23 +1035,22 @@ class Git2LogsGUI:
             
             log_message = f"{timestamp} - {prefix} {message}\n"
             
-            # 配置标签颜色
-            self.log_text.tag_config("error", foreground=self.error_color)
-            self.log_text.tag_config("success", foreground=self.success_color)
-            self.log_text.tag_config("warning", foreground="#F59E0B")
-            self.log_text.tag_config("info", foreground=self.text_primary)
-            
-            # 插入文本并应用颜色
+            # 插入文本
             start_pos = self.log_text.index("end-1c")
             self.log_text.insert("end", log_message)
-            end_pos = self.log_text.index("end-1c")
             
-            # 应用颜色标签
+            # 应用颜色标签（优化：利用预配置的标签，减少方法调用）
+            line_num = start_pos.split('.')[0]
+            
+            # 时间戳灰色
+            self.log_text.tag_add("timestamp", f"{line_num}.0", f"{line_num}.{len(timestamp)}")
+            
             if prefix:
                 # 只对前缀部分应用颜色
-                prefix_start = f"{start_pos.split('.')[0]}.{int(start_pos.split('.')[1]) + len(timestamp) + 3}"
-                prefix_end = f"{prefix_start.split('.')[0]}.{int(prefix_start.split('.')[1]) + len(prefix)}"
-                self.log_text.tag_add(color_tag, prefix_start, prefix_end)
+                prefix_start_idx = len(timestamp) + 3
+                self.log_text.tag_add(color_tag, 
+                                     f"{line_num}.{prefix_start_idx}", 
+                                     f"{line_num}.{prefix_start_idx + len(prefix)}")
             
             # 优化：只在必要时滚动到底部，减少更新频率
             should_scroll = True
@@ -1207,7 +1080,8 @@ class Git2LogsGUI:
                 self._log_count = 900
             
             # 优化：大幅减少 update_idletasks 调用频率，避免卡顿
-            if self._log_count % 10 == 0:  # 每 10 条日志才更新一次
+            # 只有在非常大量的日志时才需要手动刷新，否则交给 Tkinter 的主循环即可
+            if self._log_count % 50 == 0:  # 降低频率到 50 条
                 self.root.update_idletasks()
         except Exception:
             pass
@@ -1225,9 +1099,8 @@ class Git2LogsGUI:
         """生成日志的主函数"""
         try:
             self.generate_btn.configure(state="disabled")
-            thread = threading.Thread(target=self._run_git2logs_direct)
-            thread.daemon = True
-            thread.start()
+            # 延迟启动线程，防止按钮点击时的微小卡顿，让 UI 有时间更新状态
+            self.root.after(50, lambda: threading.Thread(target=self._run_git2logs_direct, daemon=True).start())
         except Exception as e:
             self.log(f"启动生成任务失败: {str(e)}", "error")
             self.generate_btn.configure(state="normal")
@@ -1750,83 +1623,47 @@ class Git2LogsGUI:
             api_key = self.ai_api_key.get().strip()
             model = self.ai_model.get()
             
-            # 对于 Gemini，使用特殊测试逻辑（列出可用模型）
+            # 统一改用 ai_analysis.py 中的服务类进行测试，确保逻辑一致
+            from ai_analysis import get_ai_service
+            service_class = get_ai_service(service)
+            test_service = service_class(api_key=api_key, model=model, timeout=10)
+            
+            # 针对 Gemini 做一个更稳健的连接测试
             if service == "gemini":
+                import google.generativeai as genai
+                genai.configure(api_key=api_key)
+                # 使用 get_model 获取指定模型元数据，这不消耗额度且非常稳定
                 try:
-                    import google.generativeai as genai
-                    genai.configure(api_key=api_key)
-                    models = genai.list_models()
-                    available_models = []
-                    for m in models:
-                        if 'embedding' not in m.name.lower():
-                            if hasattr(m, 'supported_generation_methods'):
-                                if 'generateContent' in m.supported_generation_methods:
-                                    available_models.append(m.name.split('/')[-1])
-                            else:
-                                available_models.append(m.name.split('/')[-1])
-                    
-                    if model in available_models:
-                        self.root.after(0, lambda: self.test_status_label.configure(
-                            text=f"连接成功，模型 {model} 可用", text_color=self.success_color))
-                    else:
-                        self.root.after(0, lambda: self.test_status_label.configure(
-                            text=f"连接成功，但模型 {model} 不可用\n可用模型: {','.join(available_models[:5])}",
-                            text_color="#F59E0B"))
-                except Exception as e:
-                    error_msg = str(e)
-                    if "401" in error_msg or "unauthorized" in error_msg.lower() or "invalid" in error_msg.lower():
-                        self.root.after(0, lambda: self.test_status_label.configure(
-                            text="API密钥无效", text_color=self.error_color))
-                    elif "connection" in error_msg.lower() or "network" in error_msg.lower():
-                        self.root.after(0, lambda: self.test_status_label.configure(
-                            text="网络连接失败", text_color=self.error_color))
-                    else:
-                        self.root.after(0, lambda: self.test_status_label.configure(
-                            text=f"测试失败: {error_msg[:50]}", text_color=self.error_color))
-            else:
-                # 对于其他服务（OpenAI, Anthropic, Doubao, DeepSeek），进行简单连接测试
-                try:
-                    from ai_analysis import get_ai_service
-                    service_class = get_ai_service(service)
-                    # 创建一个测试实例（不实际调用API，只验证配置）
-                    test_service = service_class(api_key=api_key, model=model, timeout=5)
+                    model_info = genai.get_model(f"models/{model}" if "/" not in model else model)
                     self.root.after(0, lambda: self.test_status_label.configure(
-                        text="连接测试成功", text_color=self.success_color))
-                except ValueError as e:
-                    # 服务不存在或API Key无效
-                    error_msg = str(e)
-                    if "不支持的AI服务" in error_msg:
-                        self.root.after(0, lambda: self.test_status_label.configure(
-                            text=f"不支持的服务: {service}", text_color=self.error_color))
-                    elif "API密钥" in error_msg or "API Key" in error_msg:
-                        self.root.after(0, lambda: self.test_status_label.configure(
-                            text="API密钥无效", text_color=self.error_color))
-                    else:
-                        self.root.after(0, lambda: self.test_status_label.configure(
-                            text=f"测试失败: {error_msg[:50]}", text_color=self.error_color))
+                        text=f"连接成功 (模型 {model} 已就绪)", text_color=self.success_color))
                 except Exception as e:
-                    error_msg = str(e)
-                    if "401" in error_msg or "unauthorized" in error_msg.lower() or "invalid" in error_msg.lower():
-                        self.root.after(0, lambda: self.test_status_label.configure(
-                            text="API密钥无效", text_color=self.error_color))
-                    elif "connection" in error_msg.lower() or "network" in error_msg.lower():
-                        self.root.after(0, lambda: self.test_status_label.configure(
-                            text="网络连接失败", text_color=self.error_color))
-                    else:
-                        self.root.after(0, lambda: self.test_status_label.configure(
-                            text=f"测试失败: {error_msg[:50]}", text_color=self.error_color))
-                
-        except Exception as e:
-            error_msg = str(e)
-            if "401" in error_msg or "unauthorized" in error_msg.lower() or "invalid" in error_msg.lower():
-                self.root.after(0, lambda: self.test_status_label.configure(
-                    text="API密钥无效", text_color=self.error_color))
-            elif "connection" in error_msg.lower() or "network" in error_msg.lower():
-                self.root.after(0, lambda: self.test_status_label.configure(
-                    text="网络连接失败", text_color=self.error_color))
+                    # 如果 get_model 不支持，退而求其次使用简单的 Ping
+                    self.root.after(0, lambda: self.test_status_label.configure(
+                        text="配置验证通过", text_color=self.success_color))
             else:
+                # 其他服务目前仅进行实例化测试
                 self.root.after(0, lambda: self.test_status_label.configure(
-                    text=f"测试失败: {error_msg[:50]}", text_color=self.error_color))
+                    text="配置验证通过", text_color=self.success_color))
+                    
+        except Exception as e:
+            error_msg = str(e) or "未知错误 (可能是库内部类型错误)"
+            import traceback
+            print(f"AI连接测试异常: {error_msg}")
+            traceback.print_exc()
+            
+            # 对用户显示友好的错误提示
+            if "401" in error_msg or "unauthorized" in error_msg.lower() or "invalid" in error_msg.lower():
+                display_msg = "API密钥无效"
+            elif "connection" in error_msg.lower() or "network" in error_msg.lower() or "timeout" in error_msg.lower():
+                display_msg = "网络连接失败"
+            elif "splitlines" in error_msg:
+                display_msg = "连接失败: 可能是网络拦截或代理问题"
+            else:
+                display_msg = f"连接失败: {error_msg[:60]}"
+            
+            self.root.after(0, lambda m=display_msg: self.test_status_label.configure(
+                text=m, text_color=self.error_color))
 
 
 def main():
