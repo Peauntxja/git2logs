@@ -1014,6 +1014,16 @@ class Git2LogsGUI:
     def log(self, message, log_type="info"):
         """添加日志消息（带颜色前缀）"""
         try:
+            # Tk/CustomTkinter 不是线程安全的：任何 UI 更新必须在主线程执行。
+            # 否则在 macOS 上容易触发 Tcl_Panic / abort（尤其是多次生成、日志量较大时）。
+            import threading
+            if threading.current_thread() is not threading.main_thread():
+                try:
+                    self.root.after(0, lambda: self.log(message, log_type))
+                except Exception:
+                    pass
+                return
+
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             
             # 根据类型添加颜色前缀
@@ -1089,6 +1099,14 @@ class Git2LogsGUI:
     def clear_logs(self):
         """清空日志"""
         try:
+            import threading
+            if threading.current_thread() is not threading.main_thread():
+                try:
+                    self.root.after(0, self.clear_logs)
+                except Exception:
+                    pass
+                return
+
             self.log_text.delete(1.0, "end")
             self._log_count = 0
             self.log("日志已清空", "info")
@@ -1107,6 +1125,8 @@ class Git2LogsGUI:
     
     def _run_git2logs_direct(self):
         """在后台线程中执行git2logs（延迟导入模块以提高启动速度）"""
+        root_logger = None
+        gui_handler = None
         try:
             from datetime import datetime
             import logging
@@ -1140,7 +1160,15 @@ class Git2LogsGUI:
             gui_handler.setFormatter(formatter)
             
             root_logger = logging.getLogger()
+            # 避免重复添加 handler：第二次点击“生成”会导致 handler 叠加、日志倍增，
+            # 同时更容易触发 Tk 跨线程更新导致的崩溃。
+            try:
+                if hasattr(self, "_gui_log_handler") and self._gui_log_handler in root_logger.handlers:
+                    root_logger.removeHandler(self._gui_log_handler)
+            except Exception:
+                pass
             root_logger.addHandler(gui_handler)
+            self._gui_log_handler = gui_handler
             root_logger.setLevel(logging.INFO)
             
             self.log("=" * 60, "info")
@@ -1177,7 +1205,10 @@ class Git2LogsGUI:
             # 日期处理
             since_date = None
             until_date = None
-            if self.use_today.get():
+            use_today_value = self.use_today.get()
+            self.log(f"调试: '今天'复选框状态: {use_today_value}", "info")
+            
+            if use_today_value:
                 # 使用今天的日期（考虑时区问题）
                 # GitLab API 使用 UTC 时间，为了覆盖时区差异，我们扩展日期范围（前后各1天）
                 from datetime import datetime, timedelta
@@ -1195,32 +1226,48 @@ class Git2LogsGUI:
                 if today_local_str != today_utc:
                     self.log(f"提示: 本地日期为 {today_local_str}，UTC 日期为 {today_utc}，已扩展日期范围以覆盖时区差异", "info")
             else:
+                # 从输入框获取日期
                 since_date_str = self.since_date.get().strip()
                 until_date_str = self.until_date.get().strip()
+                self.log(f"调试: 从输入框获取的日期 - 起始: '{since_date_str}', 结束: '{until_date_str}'", "info")
+                
                 # 如果只填写了一个日期，自动扩展日期范围
                 if since_date_str and not until_date_str:
                     until_date_str = since_date_str
+                    self.log(f"调试: 只填写了起始日期，自动设置结束日期为: {until_date_str}", "info")
                 if until_date_str and not since_date_str:
                     since_date_str = until_date_str
+                    self.log(f"调试: 只填写了结束日期，自动设置起始日期为: {since_date_str}", "info")
+                
                 # 允许日期为空（不指定日期范围，查询所有提交）
                 if since_date_str:
                     since_date = since_date_str
                 if until_date_str:
                     until_date = until_date_str
+                    
                 if not since_date and not until_date:
                     self.log("提示: 未指定日期范围，将查询所有提交记录", "info")
-                elif since_date and until_date and since_date == until_date:
-                    # 如果只指定了一天，也扩展日期范围
-                    from datetime import datetime, timedelta
+                elif since_date and until_date:
+                    # 验证日期格式
                     try:
-                        date_obj = datetime.strptime(since_date, '%Y-%m-%d')
-                        since_date_obj = date_obj - timedelta(days=1)
-                        until_date_obj = date_obj + timedelta(days=1)
-                        since_date = since_date_obj.strftime('%Y-%m-%d')
-                        until_date = until_date_obj.strftime('%Y-%m-%d')
-                        self.log(f"日期范围已扩展: {since_date} 至 {until_date} (覆盖时区差异)", "info")
-                    except Exception:
-                        pass
+                        from datetime import datetime
+                        datetime.strptime(since_date, '%Y-%m-%d')
+                        datetime.strptime(until_date, '%Y-%m-%d')
+                        self.log(f"调试: 日期格式验证通过 - 起始: {since_date}, 结束: {until_date}", "info")
+                        
+                        # 如果只指定了一天，不扩展日期范围，直接使用用户输入的日期
+                        # 移除自动扩展逻辑，严格按照用户输入的日期范围查询
+                        if since_date == until_date:
+                            self.log(f"使用指定的日期: {since_date}", "info")
+                        else:
+                            self.log(f"使用日期范围: {since_date} 至 {until_date}", "info")
+                    except ValueError as e:
+                        self.log(f"错误: 日期格式无效 - {str(e)}", "error")
+                        self.log(f"  起始日期: '{since_date}', 结束日期: '{until_date}'", "error")
+                        self.log("  日期格式应为 YYYY-MM-DD，例如: 2026-01-21", "error")
+                        self.root.after(0, lambda: messagebox.showerror("错误", f"日期格式无效: {str(e)}\n\n日期格式应为 YYYY-MM-DD，例如: 2026-01-21"))
+                        self.root.after(0, lambda: self.generate_btn.configure(state="normal"))
+                        return
             
             # 创建GitLab客户端
             self.log(f"正在连接到 GitLab: {gitlab_url}", "info")
@@ -1282,9 +1329,18 @@ class Git2LogsGUI:
                     self.log(f"分支: {branch}", "info")
                 else:
                     self.log(f"分支: (所有分支)", "info")
+                if since_date and until_date:
+                    self.log(f"日期范围: {since_date} 至 {until_date} (GitLab API 将使用 UTC 时间)", "info")
+                elif since_date:
+                    self.log(f"起始日期: {since_date} (GitLab API 将使用 UTC 时间)", "info")
+                elif until_date:
+                    self.log(f"结束日期: {until_date} (GitLab API 将使用 UTC 时间)", "info")
+                else:
+                    self.log("日期范围: 未指定（查询所有提交）", "info")
                 
                 try:
                     project = gl.projects.get(project_identifier)
+                    self.log(f"调试: 调用 get_commits_by_author，参数 - since_date: {since_date}, until_date: {until_date}, branch: {branch}", "info")
                     commits = get_commits_by_author(
                         project, author,
                         since_date=since_date,
@@ -1397,6 +1453,16 @@ class Git2LogsGUI:
             self.log(traceback.format_exc(), "error")
             self.root.after(0, lambda: messagebox.showerror("错误", f"生成失败: {str(e)}"))
             self.root.after(0, lambda: self.generate_btn.configure(state="normal"))
+        finally:
+            # 清理本次添加的 handler，防止长期运行/多次生成后堆积
+            try:
+                import logging
+                if root_logger is None:
+                    root_logger = logging.getLogger()
+                if gui_handler is not None and gui_handler in root_logger.handlers:
+                    root_logger.removeHandler(gui_handler)
+            except Exception:
+                pass
     
     def _manual_ai_analysis(self):
         """手动触发AI分析"""

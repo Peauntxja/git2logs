@@ -914,6 +914,15 @@ class Git2LogsGUI:
     def log(self, message):
         """添加日志消息"""
         try:
+            # Tk 不是线程安全的：任何 UI 更新必须在主线程执行。
+            import threading
+            if threading.current_thread() is not threading.main_thread():
+                try:
+                    self.root.after(0, lambda: self.log(message))
+                except Exception:
+                    pass
+                return
+
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             log_message = f"{timestamp} - {message}\n"
             self.log_text.insert(tk.END, log_message)
@@ -930,6 +939,14 @@ class Git2LogsGUI:
     def clear_logs(self):
         """清空日志"""
         try:
+            import threading
+            if threading.current_thread() is not threading.main_thread():
+                try:
+                    self.root.after(0, self.clear_logs)
+                except Exception:
+                    pass
+                return
+
             self.log_text.delete(1.0, tk.END)
             self._log_count = 0
             self.log("日志已清空")
@@ -949,6 +966,8 @@ class Git2LogsGUI:
     
     def _run_git2logs_direct(self):
         """在后台线程中执行git2logs"""
+        root_logger = None
+        gui_handler = None
         try:
             from datetime import datetime
             
@@ -982,7 +1001,14 @@ class Git2LogsGUI:
             
             # 获取根日志记录器并添加处理器
             root_logger = logging.getLogger()
+            # 避免重复添加 handler（多次生成会叠加，导致日志倍增/线程问题更明显）
+            try:
+                if hasattr(self, "_gui_log_handler") and self._gui_log_handler in root_logger.handlers:
+                    root_logger.removeHandler(self._gui_log_handler)
+            except Exception:
+                pass
             root_logger.addHandler(gui_handler)
+            self._gui_log_handler = gui_handler
             root_logger.setLevel(logging.INFO)
             
             self.log("=" * 60)
@@ -1167,6 +1193,16 @@ class Git2LogsGUI:
             self.log(traceback.format_exc())
             self.root.after(0, lambda: messagebox.showerror("错误", f"生成失败: {str(e)}"))
             self.root.after(0, lambda: self.generate_btn.config(state='normal'))
+        finally:
+            # 清理本次 handler，防止多次运行堆积
+            try:
+                import logging
+                if root_logger is None:
+                    root_logger = logging.getLogger()
+                if gui_handler is not None and gui_handler in root_logger.handlers:
+                    root_logger.removeHandler(gui_handler)
+            except Exception:
+                pass
     
     def _manual_ai_analysis(self):
         """手动触发AI分析"""
