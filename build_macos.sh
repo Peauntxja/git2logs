@@ -51,12 +51,13 @@ else
 fi
 
 # 使用 PyInstaller 打包（使用 onedir 模式以提升启动速度）
-echo "开始打包（使用 onedir 模式以提升启动速度）..."
+echo "开始打包（使用 onedir 模式以提升启动速度，目标架构: arm64）..."
 $PYINSTALLER_CMD --name="MIZUKI-TOOLBOX" \
     --windowed \
     --onedir \
     --clean \
     --noconfirm \
+    --target-arch arm64 \
     --exclude-module pandas \
     --exclude-module IPython \
     --exclude-module matplotlib \

@@ -2373,7 +2373,8 @@ def generate_daily_report(all_results, author_name, since_date=None, until_date=
             commit = item['commit']
             commit_type = item['type']
             emoji = item['emoji']
-            time_str = item['time'].strftime('%H:%M')
+            # 显示完整日期+时间，便于跨多天的日报查看
+            time_str = item['time'].strftime('%Y-%m-%d %H:%M')
             
             # 获取详细commit信息
             try:
