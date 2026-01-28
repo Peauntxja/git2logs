@@ -525,7 +525,8 @@ class Git2LogsGUI:
         format_options = [
             ("Markdown 提交日志", "commits"),
             ("开发日报 (Markdown)", "daily_report"),
-            ("统计报告 (代码统计与评分)", "statistics"),
+            ("工时分配报告 (详细工时统计)", "work_hours"),
+            ("统计报告 (代码统计)", "statistics"),
             ("HTML 格式", "html"),
             ("PNG 图片", "png"),
             ("批量生成所有格式", "all")
@@ -1423,7 +1424,15 @@ class Git2LogsGUI:
                 elif output_format == "daily_report":
                     report_content = generate_daily_report(
                         all_results, author,
-                        since_date=since_date, until_date=until_date
+                        since_date=since_date, until_date=until_date,
+                        branch=branch
+                    )
+                elif output_format == "work_hours":
+                    from git2logs import generate_work_hours_report
+                    report_content = generate_work_hours_report(
+                        all_results, author,
+                        since_date=since_date, until_date=until_date,
+                        daily_hours=8.0, branch=branch
                     )
                 else:
                     self.log(f"暂不支持 {output_format} 格式的直接生成", "error")
