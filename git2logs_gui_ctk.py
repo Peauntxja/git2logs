@@ -50,14 +50,16 @@ class Git2LogsGUI:
         try:
             self.root = root
             self.root.title("MIZUKI-GITLAB工具箱")
-            self.root.geometry("700x800")
+            self.root.geometry("600x900")
             self.root.minsize(400, 700)
             self.root.resizable(True, True)  # 允许自由调整大小
             
             # 保存待处理的AI分析数据
             self._pending_ai_data = None
             self._log_count = 0
-            
+            self._is_running = False  # 跟踪生成任务运行状态
+            self._ai_is_running = False  # 跟踪AI分析任务运行状态
+
             # 配置 CustomTkinter 主题
             ctk.set_appearance_mode("dark")  # 强制暗黑模式
             ctk.set_default_color_theme("blue")  # 使用蓝色主题
@@ -1117,12 +1119,25 @@ class Git2LogsGUI:
     def generate_logs(self):
         """生成日志的主函数"""
         try:
+            # 防止重复点击：如果已经在运行，直接返回
+            if hasattr(self, '_is_running') and self._is_running:
+                self.log("任务正在运行中，请等待完成...", "warning")
+                return
+
             self.generate_btn.configure(state="disabled")
-            # 延迟启动线程，防止按钮点击时的微小卡顿，让 UI 有时间更新状态
-            self.root.after(50, lambda: threading.Thread(target=self._run_git2logs_direct, daemon=True).start())
+            self._is_running = True
+
+            # 立即更新UI，确保按钮状态变化可见
+            self.root.update_idletasks()
+
+            # 使用线程直接启动，避免after延迟导致的响应问题
+            thread = threading.Thread(target=self._run_git2logs_direct, daemon=True)
+            thread.start()
+
         except Exception as e:
             self.log(f"启动生成任务失败: {str(e)}", "error")
             self.generate_btn.configure(state="normal")
+            self._is_running = False
     
     def _run_git2logs_direct(self):
         """在后台线程中执行git2logs（延迟导入模块以提高启动速度）"""
@@ -1210,22 +1225,19 @@ class Git2LogsGUI:
             self.log(f"调试: '今天'复选框状态: {use_today_value}", "info")
             
             if use_today_value:
-                # 使用今天的日期（考虑时区问题）
-                # GitLab API 使用 UTC 时间，为了覆盖时区差异，我们扩展日期范围（前后各1天）
-                from datetime import datetime, timedelta
+                # 使用今天的日期
+                from datetime import datetime
                 today_local = datetime.now()
-                # 扩展日期范围：前一天到后一天，以覆盖时区差异
-                since_date_obj = today_local - timedelta(days=1)
-                until_date_obj = today_local + timedelta(days=1)
-                since_date = since_date_obj.strftime('%Y-%m-%d')
-                until_date = until_date_obj.strftime('%Y-%m-%d')
-                self.log(f"使用今天的日期范围: {since_date} 至 {until_date} (已扩展以覆盖时区差异)", "info")
+                # 直接使用今天的日期，不再扩展范围
+                since_date = today_local.strftime('%Y-%m-%d')
+                until_date = today_local.strftime('%Y-%m-%d')
+                self.log(f"使用今天的日期: {since_date}", "info")
                 # 同时记录 UTC 日期以便调试
                 from datetime import timezone
                 today_utc = datetime.now(timezone.utc).strftime('%Y-%m-%d')
                 today_local_str = today_local.strftime('%Y-%m-%d')
                 if today_local_str != today_utc:
-                    self.log(f"提示: 本地日期为 {today_local_str}，UTC 日期为 {today_utc}，已扩展日期范围以覆盖时区差异", "info")
+                    self.log(f"提示: 本地日期为 {today_local_str}，UTC 日期为 {today_utc}，GitLab API 将使用 UTC 时间查询", "info")
             else:
                 # 从输入框获取日期
                 since_date_str = self.since_date.get().strip()
@@ -1273,7 +1285,10 @@ class Git2LogsGUI:
             # 创建GitLab客户端
             self.log(f"正在连接到 GitLab: {gitlab_url}", "info")
             if since_date and until_date:
-                self.log(f"查询日期范围: {since_date} 至 {until_date}", "info")
+                if since_date == until_date:
+                    self.log(f"查询日期: {since_date}", "info")
+                else:
+                    self.log(f"查询日期范围: {since_date} 至 {until_date}", "info")
             gl = create_gitlab_client(gitlab_url, token)
             
             # 获取提交记录
@@ -1288,7 +1303,10 @@ class Git2LogsGUI:
                 else:
                     self.log(f"分支: (所有分支)", "info")
                 if since_date and until_date:
-                    self.log(f"日期范围: {since_date} 至 {until_date} (GitLab API 将使用 UTC 时间)", "info")
+                    if since_date == until_date:
+                        self.log(f"日期: {since_date} (GitLab API 将使用 UTC 时间)", "info")
+                    else:
+                        self.log(f"日期范围: {since_date} 至 {until_date} (GitLab API 将使用 UTC 时间)", "info")
                 
                 all_results = scan_all_projects(
                     gl, author,
@@ -1331,7 +1349,10 @@ class Git2LogsGUI:
                 else:
                     self.log(f"分支: (所有分支)", "info")
                 if since_date and until_date:
-                    self.log(f"日期范围: {since_date} 至 {until_date} (GitLab API 将使用 UTC 时间)", "info")
+                    if since_date == until_date:
+                        self.log(f"日期: {since_date} (GitLab API 将使用 UTC 时间)", "info")
+                    else:
+                        self.log(f"日期范围: {since_date} 至 {until_date} (GitLab API 将使用 UTC 时间)", "info")
                 elif since_date:
                     self.log(f"起始日期: {since_date} (GitLab API 将使用 UTC 时间)", "info")
                 elif until_date:
@@ -1472,10 +1493,19 @@ class Git2LogsGUI:
                     root_logger.removeHandler(gui_handler)
             except Exception:
                 pass
+
+            # 重置运行状态，允许再次点击
+            self._is_running = False
+            self.root.after(0, lambda: self.generate_btn.configure(state="normal"))
     
     def _manual_ai_analysis(self):
         """手动触发AI分析"""
         try:
+            # 防止重复点击：如果已经在运行，直接返回
+            if hasattr(self, '_ai_is_running') and self._ai_is_running:
+                self.log("AI分析正在运行中，请等待完成...", "warning")
+                return
+
             if not self.ai_enabled.get() or not self.ai_api_key.get().strip():
                 messagebox.showwarning("提示", "请先启用AI分析并配置API Key")
                 return
@@ -1607,7 +1637,9 @@ class Git2LogsGUI:
             self.log(traceback.format_exc(), "error")
             self.root.after(0, lambda: messagebox.showerror("错误", f"AI分析失败: {str(e)}"))
         finally:
-            self.root.after(0, lambda: self.generate_btn.configure(state="normal"))
+            # 重置AI分析状态
+            self._ai_is_running = False
+            self.root.after(0, lambda: self.ai_analysis_btn.configure(state="normal"))
     
     def _perform_ai_analysis(self):
         """执行AI分析（使用待处理的数据）"""
@@ -1615,6 +1647,10 @@ class Git2LogsGUI:
             if not self._pending_ai_data:
                 messagebox.showwarning("提示", "没有可用的数据进行分析")
                 return
+
+            # 设置AI分析运行状态
+            self._ai_is_running = True
+            self.root.after(0, lambda: self.ai_analysis_btn.configure(state="disabled"))
             
             ai_config = {
                 'service': self.ai_service.get(),
@@ -1675,7 +1711,9 @@ class Git2LogsGUI:
             self.log(traceback.format_exc(), "error")
             self.root.after(0, lambda: messagebox.showerror("错误", f"AI分析失败: {str(e)}"))
         finally:
-            self.root.after(0, lambda: self.generate_btn.configure(state="normal"))
+            # 重置AI分析状态
+            self._ai_is_running = False
+            self.root.after(0, lambda: self.ai_analysis_btn.configure(state="normal"))
     
     def test_ai_connection(self):
         """测试AI连接"""
@@ -1753,13 +1791,13 @@ def main():
         # 创建根窗口（立即显示）
         root = ctk.CTk()
         root.title("MIZUKI-GITLAB工具箱")
-        root.geometry("700x800")
-        root.minsize(400, 700)
+        root.geometry("400x900")
+        root.minsize(400, 900)
         root.resizable(True, True)
         
         # 设置窗口位置（在创建应用前）
-        width = 700
-        height = 800
+        width = 400
+        height = 900
         x = (root.winfo_screenwidth() // 2) - (width // 2)
         y = (root.winfo_screenheight() // 2) - (height // 2)
         root.geometry(f'{width}x{height}+{x}+{y}')
