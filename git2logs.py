@@ -809,8 +809,13 @@ def generate_markdown_log(grouped_commits, author_name, repo_name=None, project=
             
             # 显示完整的commit message（如果有多行）
             if full_message and '\n' in full_message:
-                lines.append(f"**完整提交信息**:\n```\n{full_message}\n```\n")
-            
+                filtered_msg = '\n'.join(
+                    l for l in full_message.split('\n')
+                    if not l.strip().lower().startswith('made-with:')
+                ).strip()
+                if filtered_msg and '\n' in filtered_msg:
+                    lines.append(f"**完整提交信息**:\n```\n{filtered_msg}\n```\n")
+
             # 显示代码行数统计
             if stats:
                 lines.append(f"**代码变更**: +{stats.get('additions', 0)} -{stats.get('deletions', 0)} (总计: {stats.get('total', 0)} 行)\n")
@@ -2375,9 +2380,15 @@ def generate_daily_report(all_results, author_name, since_date=None, until_date=
             
             # 显示完整的commit message（如果有多行）
             if full_message and '\n' in full_message:
-                # 缩进显示完整信息
-                indented_message = '\n   '.join(full_message.split('\n'))
-                lines.append(f"   - 完整提交信息:\n   ```\n   {indented_message}\n   ```\n")
+                # 过滤 IDE 自动追加的元数据行（如 Made-with: Cursor）
+                filtered_lines = [
+                    l for l in full_message.split('\n')
+                    if not l.strip().lower().startswith('made-with:')
+                ]
+                filtered_message = '\n'.join(filtered_lines).strip()
+                if filtered_message and '\n' in filtered_message:
+                    indented_message = '\n   '.join(filtered_message.split('\n'))
+                    lines.append(f"   - 完整提交信息:\n   ```\n   {indented_message}\n   ```\n")
             
             # 显示代码行数统计
             if stats:
@@ -2405,64 +2416,6 @@ def generate_daily_report(all_results, author_name, since_date=None, until_date=
         
         lines.append("\n---\n\n")
     
-    # 工作分类汇总
-    lines.append("## 📋 工作分类汇总\n\n")
-    
-    for commit_type in sorted(commit_types.keys(), key=lambda x: commit_types[x], reverse=True):
-        type_emoji = analyze_commit_type(commits_by_type[commit_type][0]['commit'].message)[1] if commits_by_type[commit_type] else '📌'
-        lines.append(f"### {type_emoji} {commit_type} ({commit_types[commit_type]} 次)\n\n")
-        
-        # 按项目分组
-        by_project = defaultdict(list)
-        for item in commits_by_type[commit_type]:
-            by_project[item['project']].append(item['commit'])
-        
-        for project_path in sorted(by_project.keys()):
-            project = all_results[project_path]['project']
-            commits = by_project[project_path]
-            
-            lines.append(f"**{project.name}** ({len(commits)} 次):\n")
-            for commit in commits:
-                commit_id = commit.id[:8]
-                commit_message = commit.message.split('\n')[0]
-                lines.append(f"- [{commit_id}]({commit.web_url}) {commit_message}\n")
-            lines.append("\n")
-        
-        lines.append("---\n\n")
-    
-    # 时间线
-    lines.append("## ⏰ 工作时间线\n\n")
-    
-    all_commits_timeline = []
-    for project_path, result in all_results.items():
-        for commit in result['commits']:
-            commit_time = commit.committed_date
-            if isinstance(commit_time, str):
-                time_obj = parse_iso_date(commit_time)
-            else:
-                time_obj = commit_time
-            
-            commit_type, emoji = analyze_commit_type(commit.message)
-            all_commits_timeline.append({
-                'time': time_obj,
-                'project': project_path,
-                'commit': commit,
-                'type': commit_type,
-                'emoji': emoji
-            })
-    
-    all_commits_timeline.sort(key=lambda x: x['time'], reverse=True)
-    
-    for item in all_commits_timeline:
-        time_str = item['time'].strftime('%H:%M')
-        commit = item['commit']
-        commit_id = commit.id[:8]
-        commit_message = commit.message.split('\n')[0]
-        
-        lines.append(f"- **{time_str}** {item['emoji']} [{item['project']}]({all_results[item['project']]['project'].web_url}) - [{commit_id}]({commit.web_url}) {commit_message}\n")
-    
-    lines.append("\n---\n\n")
-
     # 工时分配表
     try:
         work_hours_data = calculate_work_hours(all_results, since_date, until_date, branch=branch)
