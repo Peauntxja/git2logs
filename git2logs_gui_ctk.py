@@ -1051,7 +1051,7 @@ class Git2LogsGUI:
             return
         # 清空旧内容
         for w in self._project_checkbox_frame.winfo_children():
-            w.destroy()
+            w.destroy() 
         self._project_checkboxes.clear()
 
         if not self._work_hours_data:
@@ -1204,7 +1204,7 @@ class Git2LogsGUI:
             self.log(traceback.format_exc(), "error")
             self.root.after(0, lambda: messagebox.showerror("导出异常", str(e)))
         finally:
-            self.root.after(0, lambda: self._excel_export_btn.configure(state="normal"))
+            self._reset_button_state("_excel_export_btn")
 
     def _create_bottom_actions(self):
         """创建底部固定操作按钮区域（固定在窗口底部，不随内容滚动）"""
@@ -1540,26 +1540,26 @@ class Git2LogsGUI:
     
     def generate_logs(self):
         """生成日志的主函数"""
-        try:
-            # 防止重复点击：如果已经在运行，直接返回
-            if hasattr(self, '_is_running') and self._is_running:
-                self.log("任务正在运行中，请等待完成...", "warning")
-                return
+        # 防止重复点击：如果已经在运行，直接返回
+        if getattr(self, '_is_running', False):
+            self.log("任务正在运行中，请等待完成...", "warning")
+            return
 
-            self.generate_btn.configure(state="disabled")
+        try:
+            # 设置运行状态和按钮状态
             self._is_running = True
+            self.generate_btn.configure(state="disabled")
 
             # 立即更新UI，确保按钮状态变化可见
             self.root.update_idletasks()
 
-            # 使用线程直接启动，避免after延迟导致的响应问题
+            # 使用线程启动，避免阻塞UI
             thread = threading.Thread(target=self._run_git2logs_direct, daemon=True)
             thread.start()
 
         except Exception as e:
             self.log(f"启动生成任务失败: {str(e)}", "error")
-            self.generate_btn.configure(state="normal")
-            self._is_running = False
+            self._reset_button_state()
     
     def _run_git2logs_direct(self):
         """在后台线程中执行git2logs（延迟导入模块以提高启动速度）"""
@@ -1637,7 +1637,7 @@ class Git2LogsGUI:
             if not gitlab_url or not token or not author:
                 self.log("错误: 请填写GitLab URL、访问令牌和提交者", "error")
                 self.root.after(0, lambda: messagebox.showerror("错误", "请填写GitLab URL、访问令牌和提交者"))
-                self.root.after(0, lambda: self.generate_btn.configure(state="normal"))
+                self._reset_button_state()
                 return
             
             # 日期处理
@@ -1701,7 +1701,7 @@ class Git2LogsGUI:
                         self.log(f"  起始日期: '{since_date}', 结束日期: '{until_date}'", "error")
                         self.log("  日期格式应为 YYYY-MM-DD，例如: 2026-01-21", "error")
                         self.root.after(0, lambda: messagebox.showerror("错误", f"日期格式无效: {str(e)}\n\n日期格式应为 YYYY-MM-DD，例如: 2026-01-21"))
-                        self.root.after(0, lambda: self.generate_btn.configure(state="normal"))
+                        self._reset_button_state()
                         return
             
             # 创建GitLab客户端
@@ -1803,7 +1803,7 @@ class Git2LogsGUI:
             if not all_results:
                 self.log("未找到任何提交记录", "warning")
                 self.root.after(0, lambda: messagebox.showwarning("提示", "未找到任何提交记录"))
-                self.root.after(0, lambda: self.generate_btn.configure(state="normal"))
+                self._reset_button_state()
                 return
             
             # 确定输出路径
@@ -1886,7 +1886,7 @@ class Git2LogsGUI:
                     self.log("工时数据已缓存，可在「Excel导出」标签页导出", "info")
                 else:
                     self.log(f"暂不支持 {output_format} 格式的直接生成", "error")
-                    self.root.after(0, lambda: self.generate_btn.configure(state="normal"))
+                    self._reset_button_state()
                     return
                 
                 if os.path.isdir(output_path):
@@ -1912,15 +1912,15 @@ class Git2LogsGUI:
             
             self.log("=" * 60, "info")
             self.log("生成完成！", "success")
-            
-            self.root.after(0, lambda: self.generate_btn.configure(state="normal"))
+
+            self._reset_button_state()
             
         except Exception as e:
             self.log(f"生成失败: {str(e)}", "error")
             import traceback
             self.log(traceback.format_exc(), "error")
             self.root.after(0, lambda: messagebox.showerror("错误", f"生成失败: {str(e)}"))
-            self.root.after(0, lambda: self.generate_btn.configure(state="normal"))
+            self._reset_button_state()
         finally:
             # 清理本次添加的 handler，防止长期运行/多次生成后堆积
             try:
@@ -1932,9 +1932,36 @@ class Git2LogsGUI:
             except Exception:
                 pass
 
-            # 重置运行状态，允许再次点击
+    def _reset_button_state(self, button_name="generate_btn"):
+        """安全地重置按钮状态（线程安全）
+
+        Args:
+            button_name: 按钮属性名称，如 'generate_btn', '_excel_export_btn', 'ai_analysis_btn'
+        """
+        def reset():
             self._is_running = False
-            self.root.after(0, lambda: self.generate_btn.configure(state="normal"))
+            button = getattr(self, button_name, None)
+            if button and hasattr(button, 'winfo_exists') and button.winfo_exists():
+                button.configure(state="normal")
+
+        if threading.current_thread() is threading.main_thread():
+            reset()
+        else:
+            self.root.after(0, reset)
+
+    def _safe_button_operation(self, button_name, operation):
+        """安全地执行按钮操作（线程安全）
+
+        Args:
+            button_name: 按钮属性名称
+            operation: 操作函数
+        """
+        button = getattr(self, button_name, None)
+        if button and hasattr(button, 'winfo_exists') and button.winfo_exists():
+            if threading.current_thread() is threading.main_thread():
+                operation(button)
+            else:
+                self.root.after(0, lambda: operation(button))
     
     def _manual_ai_analysis(self):
         """手动触发AI分析"""
@@ -2077,7 +2104,7 @@ class Git2LogsGUI:
         finally:
             # 重置AI分析状态
             self._ai_is_running = False
-            self.root.after(0, lambda: self.ai_analysis_btn.configure(state="normal"))
+            self._reset_button_state("ai_analysis_btn")
     
     def _perform_ai_analysis(self):
         """执行AI分析（使用待处理的数据）"""
@@ -2088,7 +2115,7 @@ class Git2LogsGUI:
 
             # 设置AI分析运行状态
             self._ai_is_running = True
-            self.root.after(0, lambda: self.ai_analysis_btn.configure(state="disabled"))
+            self._safe_button_operation("ai_analysis_btn", lambda btn: btn.configure(state="disabled"))
             
             ai_config = {
                 'service': self.ai_service.get(),
@@ -2151,7 +2178,7 @@ class Git2LogsGUI:
         finally:
             # 重置AI分析状态
             self._ai_is_running = False
-            self.root.after(0, lambda: self.ai_analysis_btn.configure(state="normal"))
+            self._reset_button_state("ai_analysis_btn")
     
     def test_ai_connection(self):
         """测试AI连接"""
