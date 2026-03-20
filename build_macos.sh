@@ -70,6 +70,14 @@ $PYINSTALLER_CMD --name="MIZUKI-TOOLBOX" \
     --exclude-module PIL.ImageTransform \
     --exclude-module PIL.ImageWin \
     --add-data "git2logs.py:." \
+    --add-data "config.py:." \
+    --add-data "models.py:." \
+    --add-data "gitlab_client.py:." \
+    --add-data "commit_analysis.py:." \
+    --add-data "work_hours.py:." \
+    --add-data "report_generator.py:." \
+    --add-data "service.py:." \
+    --add-data "image_converter.py:." \
     --add-data "ai_analysis.py:." \
     --add-data "generate_report_image.py:." \
     --add-data "git2logs_gui_ctk.py:." \
@@ -87,6 +95,14 @@ $PYINSTALLER_CMD --name="MIZUKI-TOOLBOX" \
     --hidden-import=anthropic \
     --hidden-import=google.generativeai \
     --hidden-import=ai_analysis \
+    --hidden-import=config \
+    --hidden-import=models \
+    --hidden-import=gitlab_client \
+    --hidden-import=commit_analysis \
+    --hidden-import=work_hours \
+    --hidden-import=report_generator \
+    --hidden-import=service \
+    --hidden-import=image_converter \
     --hidden-import=customtkinter \
     --hidden-import=openpyxl \
     --hidden-import=openpyxl.styles \

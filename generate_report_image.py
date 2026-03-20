@@ -617,52 +617,12 @@ def generate_html_report(data, output_file):
     print(f'HTML日报已生成: {output_file}')
 
 def html_to_image_chrome(html_file, output_file):
-    """使用 Chrome headless 将 HTML 转换为图片"""
-    import os
-    import subprocess
-    from pathlib import Path
-    
-    html_path = Path(html_file).absolute()
-    output_path = Path(output_file).absolute()
-    
-    # 检查 Chrome 是否在常见位置
-    chrome_paths = [
-        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-        '/Applications/Chromium.app/Contents/MacOS/Chromium',
-    ]
-    
-    chrome_path = None
-    for path in chrome_paths:
-        if os.path.exists(path):
-            chrome_path = path
-            break
-    
-    if not chrome_path:
-        return False
-    
-    try:
-        # 使用 Chrome 的 headless 模式截图
-        # 增加窗口高度以容纳更多内容（特别是时间线）
-        # 使用 --virtual-time-budget 等待页面完全加载和渲染
-        cmd = [
-            chrome_path,
-            '--headless',
-            '--disable-gpu',
-            '--window-size=1600,6000',  # 增加高度以容纳完整的时间线
-            '--virtual-time-budget=3000',  # 等待页面完全加载（3秒）
-            '--run-all-compositor-stages-before-draw',  # 等待所有渲染完成
-            '--screenshot=' + str(output_path),
-            f'file://{html_path}'
-        ]
-        
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        
-        if result.returncode == 0 and output_path.exists():
-            return True
-        return False
-            
-    except Exception:
-        return False
+    """使用 Chrome headless 将 HTML 转换为图片
+
+    向后兼容的薄封装，实际调用 image_converter 统一模块。
+    """
+    from image_converter import convert_html_to_image
+    return convert_html_to_image(html_file, output_file)
 
 def find_markdown_files(path):
     """查找路径中的 Markdown 文件（过滤掉文档文件）"""

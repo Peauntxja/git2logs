@@ -12,6 +12,8 @@ import queue
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Any
 
+from config import AIConfig
+
 logger = logging.getLogger(__name__)
 
 
@@ -170,7 +172,7 @@ class BaseAIService(ABC):
             dict: AI分析结果
         """
         # 限制报告内容长度，避免超过token限制
-        max_report_length = 10000
+        max_report_length = AIConfig.MAX_REPORT_LENGTH
         if len(report_content) > max_report_length:
             report_content = report_content[:max_report_length] + "\n\n[报告内容已截断...]"
         
@@ -254,7 +256,7 @@ class OpenAICompatibleService(BaseAIService):
         client_args = {
             'api_key': self.api_key,
             'timeout': self.timeout,
-            'max_retries': 2
+            'max_retries': AIConfig.MAX_RETRIES
         }
 
         # 如果有 base_url，添加到参数中
@@ -272,9 +274,9 @@ class OpenAICompatibleService(BaseAIService):
                 {"role": "system", "content": system_message},
                 {"role": "user", "content": prompt}
             ],
-            "temperature": 0.3,
-            "max_tokens": 4000,
-            "top_p": 0.95,
+            "temperature": AIConfig.TEMPERATURE,
+            "max_tokens": AIConfig.MAX_TOKENS,
+            "top_p": AIConfig.TOP_P,
         }
 
         # 检查是否支持 JSON 模式
@@ -283,7 +285,7 @@ class OpenAICompatibleService(BaseAIService):
             try:
                 request_params["response_format"] = {"type": "json_object"}
             except Exception:
-                pass  # 如果不支持就忽略
+                logger.debug("设置JSON模式response_format失败，模型可能不支持")
 
         # 调用 API
         response = client.chat.completions.create(**request_params)
@@ -355,7 +357,7 @@ class AnthropicService(BaseAIService):
         
         message = client.messages.create(
             model=self.model,
-            max_tokens=4000,
+            max_tokens=AIConfig.MAX_TOKENS,
             messages=[
                 {"role": "user", "content": f"{system_message}\n\n{prompt}"}
             ]
