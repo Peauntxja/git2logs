@@ -94,13 +94,26 @@ def get_script_path(script_name):
     
     return script_name
 
+
+def _resolve_monospace_font(root, size=10):
+    """在常见等宽字体中选第一个系统可用的，避免 JetBrains Mono 缺失时回退不一致。"""
+    try:
+        from tkinter import font as tkfont
+        families = set(tkfont.families(root))
+    except Exception:
+        families = set()
+    for name in ("JetBrains Mono", "Menlo", "Monaco", "Consolas", "Courier New", "Courier"):
+        if name in families:
+            return (name, size)
+    return ("Courier", size)
+
+
 class Git2LogsGUI:
     def __init__(self, root):
         try:
             self.root = root
             self.root.title("MIZUKI-GITLAB工具箱")
-            self.root.geometry("600x900")
-            self.root.minsize(400, 700)
+            # 窗口尺寸与最小尺寸由 main() 统一设置，避免与启动流程冲突
             self.root.resizable(True, True)  # 允许自由调整大小
             
             # 保存待处理的AI分析数据
@@ -110,6 +123,9 @@ class Git2LogsGUI:
             self._ai_is_running = False  # 跟踪AI分析任务运行状态
             self._work_hours_data = None  # 缓存工时数据，供Excel导出使用
             self._project_checkboxes: dict = {}  # 项目名 -> BooleanVar
+            self._validation_labels: dict = {}  # 字段名 -> 校验提示 CTkLabel
+            self._log_collapsed = False
+            self._current_theme = "dark"
 
             # 配置 CustomTkinter 主题
             ctk.set_appearance_mode("dark")  # 强制暗黑模式
@@ -135,6 +151,7 @@ class Git2LogsGUI:
             # 创建主容器（立即显示）
             main_container = ctk.CTkFrame(root, fg_color=self.bg_main, corner_radius=0)
             main_container.pack(fill="both", expand=True, padx=0, pady=0)
+            self._main_container = main_container
             
             # ── 顶部 Header 栏 ─────────────────────────────
             self._create_header(main_container)
@@ -156,6 +173,7 @@ class Git2LogsGUI:
             # ── Body: 侧边栏(左) + 右侧内容(右) ───────────
             body_frame = ctk.CTkFrame(main_container, fg_color=self.bg_main, corner_radius=0)
             body_frame.pack(fill="both", expand=True)
+            self._body_frame = body_frame
 
             # 侧边栏（固定宽度76px）
             self._sidebar_frame = ctk.CTkFrame(body_frame, fg_color="#1C1C1F", corner_radius=0, width=76)
@@ -165,6 +183,7 @@ class Git2LogsGUI:
             # 右侧面板
             right_panel = ctk.CTkFrame(body_frame, fg_color=self.bg_main, corner_radius=0)
             right_panel.pack(side="left", fill="both", expand=True)
+            self._right_panel = right_panel
 
             # 日志区域（右侧顶部）
             self._create_log_area(right_panel)
@@ -182,7 +201,7 @@ class Git2LogsGUI:
             try:
                 self.scroll_container.configure(scrollbar_button_color=self.styles.colors['bg_main'],
                                                 scrollbar_button_hover_color=self.styles.colors['bg_main'])
-            except:
+            except Exception:
                 pass
             
             # 延迟并批量创建标签页内容（消除渲染毛刺）
@@ -205,6 +224,7 @@ class Git2LogsGUI:
 
                     # 绑定表单验证（在控件创建完成后）
                     self._bind_form_validation()
+                    self._enhance_form_interaction()
 
                     # 初始日志
                     self.log("欢迎使用 MIZUKI-GITLAB工具箱！", "info")
@@ -223,19 +243,25 @@ class Git2LogsGUI:
             print(error_msg)
             try:
                 messagebox.showerror("初始化错误", error_msg)
-            except:
+            except Exception:
                 pass
             raise
+
+    def _sidebar_selected_bg(self):
+        """侧栏当前选中项背景（随深浅主题变化）。"""
+        return "#1E3A5F" if getattr(self, "_current_theme", "dark") == "dark" else "#C7D2FE"
     
     def _create_header(self, parent):
         """创建顶部 Header 栏（品牌名 + 版本信息）"""
         header = ctk.CTkFrame(parent, fg_color="#111113", height=48, corner_radius=0)
         header.pack(fill="x", side="top")
         header.pack_propagate(False)
+        self._header_frame = header
 
         # 底部分隔线
         sep = ctk.CTkFrame(header, fg_color=self.styles.colors['border'], height=1, corner_radius=0)
         sep.pack(side="bottom", fill="x")
+        self._header_sep = sep
 
         inner = ctk.CTkFrame(header, fg_color="transparent")
         inner.pack(fill="both", expand=True, padx=16)
@@ -243,20 +269,22 @@ class Git2LogsGUI:
         # 左：图标 + 品牌名
         left = ctk.CTkFrame(inner, fg_color="transparent")
         left.pack(side="left", fill="y")
-        ctk.CTkLabel(left,
+        self._header_brand_lbl = ctk.CTkLabel(left,
                      text="⬡  MIZUKI TOOLBOX",
                      font=ctk.CTkFont(size=15, weight="bold"),
                      text_color=self.styles.colors['text_primary'],
-                     fg_color="transparent").pack(side="left", pady=13)
+                     fg_color="transparent")
+        self._header_brand_lbl.pack(side="left", pady=13)
 
         # 右：副标题
         right = ctk.CTkFrame(inner, fg_color="transparent")
         right.pack(side="right", fill="y")
-        ctk.CTkLabel(right,
+        self._header_sub_lbl = ctk.CTkLabel(right,
                      text="GitLab 提交分析工具  v2.0",
                      font=ctk.CTkFont(size=11),
                      text_color=self.styles.colors['text_tertiary'],
-                     fg_color="transparent").pack(side="right", pady=16)
+                     fg_color="transparent")
+        self._header_sub_lbl.pack(side="right", pady=16)
 
     def _create_sidebar(self, parent):
         """创建左侧图标导航栏（微信风格垂直 Tab）"""
@@ -299,7 +327,7 @@ class Git2LogsGUI:
                     if self.current_tab != n else None
                 ))
                 w.bind("<Leave>",    lambda e, f=item_frame, n=tab_name: (
-                    f.configure(fg_color="#1E3A5F")
+                    f.configure(fg_color=self._sidebar_selected_bg())
                     if self.current_tab == n
                     else f.configure(fg_color="transparent")
                 ))
@@ -314,9 +342,9 @@ class Git2LogsGUI:
 
     def _create_log_area(self, parent):
         """创建日志显示区域（放在最上方）"""
-        # 日志输出区域
         log_container = ctk.CTkFrame(parent, fg_color=self.styles.colors['bg_main'], corner_radius=0)
         log_container.pack(fill="x", padx=0, pady=(0, self.styles.spacing['sm']))
+        self._log_container = log_container
         
         log_title_frame = ctk.CTkFrame(log_container,
                                      fg_color=self.styles.colors['bg_main'],
@@ -324,30 +352,49 @@ class Git2LogsGUI:
                                      corner_radius=0)
         log_title_frame.pack(fill="x", padx=20, pady=(0, 8))
         log_title_frame.pack_propagate(False)
+        self._log_title_frame = log_title_frame
         
-        log_title = ctk.CTkLabel(log_title_frame,
+        self._log_title_lbl = ctk.CTkLabel(log_title_frame,
                               text="执行日志",
                               font=self.styles.fonts['body_bold'](),
                               text_color=self.styles.colors['text_primary'],
                               anchor="w")
-        log_title.pack(side="left", padx=0, pady=10)
+        self._log_title_lbl.pack(side="left", padx=0, pady=10)
+
+        tf_right = ctk.CTkFrame(log_title_frame, fg_color="transparent")
+        tf_right.pack(side="right", padx=0, pady=4)
+        self._log_toggle_btn = ctk.CTkButton(
+            tf_right,
+            text="收起",
+            width=56,
+            height=28,
+            font=self.styles.fonts['caption'](),
+            corner_radius=self.styles.radius['sm'],
+            fg_color=self.styles.colors['bg_card'],
+            text_color=self.styles.colors['text_secondary'],
+            hover_color=self.styles.colors['hover'],
+            border_width=1,
+            border_color=self.styles.colors['border'],
+            command=self._toggle_log_collapsed,
+        )
+        self._log_toggle_btn.pack(side="right")
         
-        # 日志文本区域 - 使用等宽字体，固定高度
         log_card = ctk.CTkFrame(log_container,
                               fg_color=self.styles.colors['bg_card'],
                               corner_radius=self.styles.radius['lg'])
         log_card.pack(fill="x", padx=20, pady=(0, 0))
+        self._log_card = log_card
         
-        # 使用 ScrolledText（CustomTkinter 没有原生的 ScrolledText）
-        # 创建一个内部Frame来放置ScrolledText
         text_container = ctk.CTkFrame(log_card, fg_color=self.styles.colors['bg_main'], corner_radius=self.styles.radius['md'])
         text_container.pack(fill="x", padx=10, pady=10)
+        self._log_text_container = text_container
         
         from tkinter import scrolledtext
+        mono = _resolve_monospace_font(self.root, 10)
         self.log_text = scrolledtext.ScrolledText(text_container,
-                                             height=8,  # 固定高度，减少占用空间
+                                             height=6,
                                              width=80,
-                                             font=("JetBrains Mono", 10),  # 等宽字体，稍小一点
+                                             font=mono,
                                              wrap="word",
                                              bg=self.styles.colors['bg_main'],
                                              fg=self.styles.colors['text_primary'],
@@ -360,12 +407,104 @@ class Git2LogsGUI:
                                              pady=12)
         self.log_text.pack(fill="both", expand=False)
         
-        # 预先配置标签颜色，避免在 log 方法中重复配置
         self.log_text.tag_config("error", foreground=self.styles.colors['error'])
         self.log_text.tag_config("success", foreground=self.styles.colors['success'])
         self.log_text.tag_config("warning", foreground=self.styles.colors['warning'])
         self.log_text.tag_config("info", foreground=self.styles.colors['text_primary'])
         self.log_text.tag_config("timestamp", foreground=self.styles.colors['text_secondary'])
+
+    def _toggle_log_collapsed(self):
+        """折叠/展开执行日志区域（仅影响布局，不改变业务逻辑）。"""
+        if not hasattr(self, "_log_card") or not hasattr(self, "_log_toggle_btn"):
+            return
+        self._log_collapsed = not self._log_collapsed
+        if self._log_collapsed:
+            self._log_card.pack_forget()
+            self._log_toggle_btn.configure(text="展开")
+        else:
+            self._log_card.pack(fill="x", padx=20, pady=(0, 0))
+            self._log_toggle_btn.configure(text="收起")
+
+    def _refresh_log_widget_theme(self):
+        """根据当前 UIStyles 同步 Tk 日志控件与标签颜色。"""
+        if not hasattr(self, "log_text"):
+            return
+        c = self.styles.colors
+        sel_fg = "#FFFFFF" if self._current_theme == "dark" else "#18181B"
+        self.log_text.configure(
+            bg=c['bg_main'],
+            fg=c['text_primary'],
+            insertbackground=c['accent'],
+            selectbackground=c['accent'],
+            selectforeground=sel_fg,
+        )
+        self.log_text.tag_config("error", foreground=c['error'])
+        self.log_text.tag_config("success", foreground=c['success'])
+        self.log_text.tag_config("warning", foreground=c['warning'])
+        self.log_text.tag_config("info", foreground=c['text_primary'])
+        self.log_text.tag_config("timestamp", foreground=c['text_secondary'])
+
+    def _refresh_chrome_for_theme(self):
+        """同步顶栏、侧栏、主布局与日志外框等与主题相关的硬编码表面色。"""
+        c = self.styles.colors
+        is_dark = self._current_theme == "dark"
+        header_bg = "#111113" if is_dark else "#EBEBEF"
+        sidebar_bg = "#1C1C1F" if is_dark else "#E4E4E9"
+
+        self.root.configure(bg=c['bg_main'])
+        if hasattr(self, "_main_container"):
+            self._main_container.configure(fg_color=c['bg_main'])
+        if hasattr(self, "_body_frame"):
+            self._body_frame.configure(fg_color=c['bg_main'])
+        if hasattr(self, "bottom_actions_frame"):
+            self.bottom_actions_frame.configure(fg_color=c['bg_main'])
+        if hasattr(self, "_right_panel"):
+            self._right_panel.configure(fg_color=c['bg_main'])
+        if hasattr(self, "scroll_container"):
+            self.scroll_container.configure(fg_color=c['bg_main'])
+            try:
+                self.scroll_container.configure(
+                    scrollbar_button_color=c['bg_main'],
+                    scrollbar_button_hover_color=c['bg_main'],
+                )
+            except Exception:
+                pass
+
+        if hasattr(self, "_header_frame"):
+            self._header_frame.configure(fg_color=header_bg)
+        if hasattr(self, "_header_sep"):
+            self._header_sep.configure(fg_color=c['border'])
+        if hasattr(self, "_header_brand_lbl"):
+            self._header_brand_lbl.configure(text_color=c['text_primary'])
+        if hasattr(self, "_header_sub_lbl"):
+            self._header_sub_lbl.configure(text_color=c['text_tertiary'])
+        if hasattr(self, "_sidebar_frame"):
+            self._sidebar_frame.configure(fg_color=sidebar_bg)
+
+        if hasattr(self, "_log_container"):
+            self._log_container.configure(fg_color=c['bg_main'])
+        if hasattr(self, "_log_title_frame"):
+            self._log_title_frame.configure(fg_color=c['bg_main'])
+        if hasattr(self, "_log_title_lbl"):
+            self._log_title_lbl.configure(text_color=c['text_primary'])
+        if hasattr(self, "_log_card"):
+            self._log_card.configure(fg_color=c['bg_card'])
+        if hasattr(self, "_log_text_container"):
+            self._log_text_container.configure(fg_color=c['bg_main'])
+        if hasattr(self, "_log_toggle_btn"):
+            self._log_toggle_btn.configure(
+                fg_color=c['bg_card'],
+                text_color=c['text_secondary'],
+                hover_color=c['hover'],
+                border_color=c['border'],
+            )
+        if hasattr(self, "_theme_btn"):
+            self._theme_btn.configure(
+                fg_color=c['bg_card'],
+                text_color=c['text_secondary'],
+                hover_color=c['hover'],
+                border_color=c['border'],
+            )
     
     def _create_tab1_gitlab_config(self):
         """创建标签页1: GitLab配置"""
@@ -399,7 +538,12 @@ class Git2LogsGUI:
                                   border_color=self.border_color,
                                   fg_color=self.bg_main,
                                   text_color=self.text_primary)
-        gitlab_entry.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 24))
+        gitlab_entry.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        row += 1
+        self._validation_labels['gitlab_url'] = ctk.CTkLabel(
+            content, text="", font=self.styles.fonts['caption'](),
+            text_color=self.styles.colors['text_secondary'], anchor="w")
+        self._validation_labels['gitlab_url'].grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 16))
         row += 1
         
         # 仓库地址
@@ -420,7 +564,12 @@ class Git2LogsGUI:
                                  border_color=self.border_color,
                                  fg_color=self.bg_main,
                                  text_color=self.text_primary)
-        repo_entry.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 16))
+        repo_entry.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        row += 1
+        self._validation_labels['repo'] = ctk.CTkLabel(
+            content, text="", font=self.styles.fonts['caption'](),
+            text_color=self.styles.colors['text_secondary'], anchor="w")
+        self._validation_labels['repo'].grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 16))
         row += 1
         
         # 扫描所有项目选项
@@ -474,7 +623,12 @@ class Git2LogsGUI:
                                    border_color=self.border_color,
                                    fg_color=self.bg_main,
                                    text_color=self.text_primary)
-        author_entry.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 24))
+        author_entry.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        row += 1
+        self._validation_labels['author'] = ctk.CTkLabel(
+            content, text="", font=self.styles.fonts['caption'](),
+            text_color=self.styles.colors['text_secondary'], anchor="w")
+        self._validation_labels['author'].grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 16))
         row += 1
         
         # 访问令牌
@@ -487,7 +641,7 @@ class Git2LogsGUI:
         
         self.token = ctk.StringVar()
         token_frame = ctk.CTkFrame(content, fg_color="transparent")
-        token_frame.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 24))
+        token_frame.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 8))
         token_frame.columnconfigure(0, weight=1)
         
         token_entry = ctk.CTkEntry(token_frame,
@@ -516,6 +670,11 @@ class Git2LogsGUI:
                                 command=lambda: self.toggle_token_visibility(token_entry))
         show_btn.grid(row=0, column=1)
         row += 1
+        self._validation_labels['token'] = ctk.CTkLabel(
+            content, text="", font=self.styles.fonts['caption'](),
+            text_color=self.styles.colors['text_secondary'], anchor="w")
+        self._validation_labels['token'].grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 16))
+        row += 1
         
         # 使用提示卡片
         hint_frame = ctk.CTkFrame(content,
@@ -539,10 +698,10 @@ class Git2LogsGUI:
                                  text_color=self.text_secondary,
                                  justify="left",
                                  anchor="w")
-        content.columnconfigure(0, weight=1)
+        hint_label.pack(anchor="w", padx=16, pady=(0, 16))
         
         # 添加底部占位符
-        ctk.CTkLabel(content, text="", height=50).grid(row=row+1, column=0)
+        ctk.CTkLabel(content, text="", height=50).grid(row=row + 1, column=0)
         
         self.tab_frames["GitLab配置"] = tab1
         tab1.pack_forget()  # 初始隐藏
@@ -676,30 +835,8 @@ class Git2LogsGUI:
         return None
 
     def _find_validation_label(self, field_name):
-        """查找验证消息标签"""
-        # 为每个字段创建验证标签的标识
-        label_indicators = {
-            'gitlab_url': ['URL', '格式'],
-            'repo': ['仓库', '扫描'],
-            'author': ['提交者', '名称', '邮箱'],
-            'token': ['令牌', '访问']
-        }
-
-        if field_name not in label_indicators:
-            return None
-
-        indicators = label_indicators[field_name]
-
-        for widget in self.tab_frames["GitLab配置"].winfo_children():
-            if isinstance(widget, ctk.CTkFrame):
-                for child in widget.winfo_children():
-                    if isinstance(child, ctk.CTkFrame):
-                        for grandchild in child.winfo_children():
-                            if isinstance(grandchild, ctk.CTkLabel):
-                                text = grandchild.cget('text')
-                                if text and any(indicator in text for indicator in indicators):
-                                    return grandchild
-        return None
+        """查找验证消息标签（GitLab 配置页使用显式引用）。"""
+        return self._validation_labels.get(field_name)
 
     def _on_scan_all_toggle(self):
         """扫描所有项目选项切换时的处理"""
@@ -764,22 +901,6 @@ class Git2LogsGUI:
 
             if hasattr(self, f'_validate_{field_name}'):
                 getattr(self, f'_validate_{field_name}')()
-
-    def _create_enhanced_validation_labels(self, parent_card, field_names):
-        """创建增强的验证标签"""
-        validation_labels = {}
-
-        for field_name in field_names:
-            label = ctk.CTkLabel(
-                parent_card,
-                text="",
-                font=self.styles.fonts['caption'](),
-                text_color=self.styles.colors['text_secondary'],
-                anchor="w"
-            )
-            validation_labels[field_name] = label
-
-        return validation_labels
     
     def _create_tab2_date_output(self):
         """创建标签页2: 日期和输出"""
@@ -1584,7 +1705,6 @@ class Git2LogsGUI:
         self.status_indicator.pack(side="left")
 
         # 主题切换按钮（右侧）
-        self._current_theme = "dark"
         theme_btn = ctk.CTkButton(status_row,
                                  text="☀ 浅色",
                                  width=80,
@@ -1670,6 +1790,7 @@ class Git2LogsGUI:
             'bg_surface': "#1F1F23",
             'text_primary': "#F4F4F5",
             'text_secondary': "#A1A1AA",
+            'text_tertiary': "#71717A",
             'border': "#3F3F46",
             'hover': "#374151",
         })
@@ -1680,6 +1801,11 @@ class Git2LogsGUI:
             self._theme_btn.configure(text="☀ 浅色")
         # 更新状态
         self._update_status("就绪", "success")
+        self._refresh_log_widget_theme()
+        self._refresh_chrome_for_theme()
+        if self.current_tab:
+            self._switch_tab(self.current_tab)
+        self.root.after(0, self._refresh_gitlab_validation_colors)
 
     def _apply_light_theme(self):
         """应用浅色主题"""
@@ -1692,6 +1818,7 @@ class Git2LogsGUI:
             'bg_surface': "#F0F0F0",
             'text_primary': "#18181B",
             'text_secondary': "#52525B",
+            'text_tertiary': "#71717A",
             'border': "#D4D4D8",
             'hover': "#E4E4E7",
         })
@@ -1702,6 +1829,24 @@ class Git2LogsGUI:
             self._theme_btn.configure(text="🌙 深色")
         # 更新状态
         self._update_status("浅色主题已启用", "success")
+        self._refresh_log_widget_theme()
+        self._refresh_chrome_for_theme()
+        if self.current_tab:
+            self._switch_tab(self.current_tab)
+        self.root.after(0, self._refresh_gitlab_validation_colors)
+
+    def _refresh_gitlab_validation_colors(self):
+        """主题切换后重新应用校验样式（边框与提示文字颜色）。"""
+        for fn in (
+            self._validate_gitlab_url,
+            self._validate_repo_url,
+            self._validate_author,
+            self._validate_token,
+        ):
+            try:
+                fn()
+            except Exception:
+                pass
 
     def _sync_color_aliases(self):
         """同步旧属性别名与最新样式颜色"""
@@ -1775,7 +1920,7 @@ class Git2LogsGUI:
             if hasattr(self, '_sidebar_btns'):
                 for name, (item_frame, icon_lbl, text_lbl) in self._sidebar_btns.items():
                     if name == tab_name:
-                        item_frame.configure(fg_color="#1E3A5F")
+                        item_frame.configure(fg_color=self._sidebar_selected_bg())
                         icon_lbl.configure(text_color=self.styles.colors['accent'])
                         text_lbl.configure(text_color=self.styles.colors['accent'])
                     else:
@@ -1996,7 +2141,7 @@ class Git2LogsGUI:
                 # 如果用户已经滚动到顶部或中间，不要自动滚动到底部
                 if visible_end_num < last_line_num - 3:
                     should_scroll = False
-            except:
+            except Exception:
                 pass
             
             if should_scroll:
@@ -2756,12 +2901,11 @@ def main():
         # 创建根窗口（立即显示）
         root = ctk.CTk()
         root.title("MIZUKI-GITLAB工具箱")
-        root.geometry("400x900")
-        root.minsize(400, 900)
+        root.minsize(520, 700)
         root.resizable(True, True)
         
-        # 设置窗口位置（在创建应用前）
-        width = 400
+        # 设置窗口位置（在创建应用前，与 Git2LogsGUI 默认尺寸一致）
+        width = 600
         height = 900
         x = (root.winfo_screenwidth() // 2) - (width // 2)
         y = (root.winfo_screenheight() // 2) - (height // 2)
@@ -2804,7 +2948,7 @@ def main():
             error_root.withdraw()
             messagebox.showerror("启动错误", error_msg)
             error_root.destroy()
-        except:
+        except Exception:
             pass
         if root:
             root.destroy()

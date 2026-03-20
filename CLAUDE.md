@@ -50,7 +50,7 @@ pip install openai anthropic google-generativeai customtkinter openpyxl
 ```bash
 # Syntax checking for modified files
 python3 -m py_compile git2logs.py
-git3 -m py_compile git2logs_gui_ctk.py
+python3 -m py_compile git2logs_gui_ctk.py
 
 # Run GUI application
 python3 git2logs_gui_ctk.py
@@ -58,18 +58,24 @@ python3 git2logs_gui_ctk.py
 # Command-line usage examples
 python git2logs.py --scan-all --gitlab-url http://gitlab.example.com --author "User" --today --token TOKEN
 python git2logs.py --repo http://gitlab.example.com/project.git --author "User" --daily-report
+
+# Generate Excel reports
+python git2logs.py --scan-all --gitlab-url http://gitlab.example.com --author "User" --today --token TOKEN --excel-export
 ```
 
 ### Testing & Debugging
 ```bash
 # Generate HTML/PNG reports from existing markdown
-git3 generate_report_image.py 2025-12-12_daily_report.md
+python3 generate_report_image.py 2025-12-12_daily_report.md
 
 # Validate Excel export functionality
 python3 -c "import excel_exporter; print('Excel module loaded successfully')"
 
 # Test AI analysis integration
 python3 -c "import ai_analysis; print('AI analysis module loaded successfully')"
+
+# Quick syntax check for all Python files
+python3 -m py_compile *.py && echo "All files compile successfully"
 ```
 
 ### Build & Packaging
@@ -90,13 +96,13 @@ rm -rf build dist *.spec
 
 **High-Impact Files (Require Careful Review):**
 - `git2logs.py` - Core business logic (lines 2214+ contain daily report generation)
-- `git2logs_gui_ctk.py` - GUI state management and event handling
-- `ai_analysis.py` - Multi-provider AI integration
+- `git2logs_gui_ctk.py` - GUI state management and event handling (UIStyles class for theming)
+- `ai_analysis.py` - Multi-provider AI integration with strategy pattern
 
 **Utility Files (Safe for Updates):**
 - `utils/` directory - Independent helper functions
-- `excel_exporter.py` - Template-based Excel generation
-- `generate_report_image.py` - HTML/CSS styling and Chrome automation
+- `excel_exporter.py` - Template-based Excel generation with openpyxl
+- `generate_report_image.py` - HTML/CSS styling and Chrome automation for PNG conversion
 
 ### GUI Architecture
 
