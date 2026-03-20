@@ -21,28 +21,46 @@ import subprocess
 from pathlib import Path
 from datetime import datetime
 
-# UI样式常量定义
+
+def _ui_font_family():
+    """与 cc-switch 一致的系统无衬线栈在 Tk 中的首选族名（见 tailwind fontFamily.sans）。"""
+    if sys.platform == "darwin":
+        return ".SF NS Text"
+    if sys.platform == "win32":
+        return "Segoe UI"
+    return "DejaVu Sans"
+
+
+def _ctk_ui_font(size: int, weight: str = "normal"):
+    fam = _ui_font_family()
+    if weight in ("bold", "semibold"):
+        return ctk.CTkFont(family=fam, size=size, weight="bold")
+    return ctk.CTkFont(family=fam, size=size)
+
+
+# UI样式常量定义（深色基准对齐 cc-switch：src/index.css 的 .dark 与 tailwind.config.cjs 灰阶）
+# 参考仓库: https://github.com/farion1231/cc-switch
 class UIStyles:
     """UI样式常量统一管理类"""
 
     # 颜色方案
     colors = {
-        'bg_main': "#18181B",      # 主背景深灰
-        'bg_card': "#27272A",      # 卡片背景
-        'bg_surface': "#1F1F23",   # 表面背景
-        'text_primary': "#F4F4F5", # 主要文字
-        'text_secondary': "#A1A1AA",# 次要文字
-        'text_tertiary': "#71717A", # 第三级文字
-        'border': "#3F3F46",       # 边框色
-        'accent': "#3B82F6",       # 科技蓝
-        'success': "#10B981",      # 成功绿
-        'warning': "#F59E0B",      # 警告黄
-        'error': "#EF4444",        # 错误红
-        'hover': "#374151",        # 悬停色
-        'active': "#1F2937",       # 激活色
+        'bg_main': "#1D1D20",      # --background 240 5% 12%
+        'bg_card': "#26262A",      # --card 240 5% 16%
+        'bg_surface': "#2B2B30",   # --secondary / muted 240 5% 18%
+        'text_primary': "#FAFAFA", # --foreground 0 0% 98%
+        'text_secondary': "#A1A1AA",  # --muted-foreground ≈ zinc-400
+        'text_tertiary': "#71717A",
+        'border': "#3D3D44",       # --border 240 5% 24%
+        'accent': "#2E9CFF",       # --primary 210 100% 54%
+        'success': "#10B981",      # tailwind green-500（与 cc-switch 一致）
+        'warning': "#F59E0B",
+        'error': "#EF4444",
+        'hover': "#34343A",
+        'active': "#2C2C32",
         'success_hover': "#059669",
         'error_hover': "#DC2626",
-        'accent_hover': "#2563EB",
+        'accent_hover': "#1E88E5",
     }
 
     # 间距系统 (基于8px网格)
@@ -63,14 +81,14 @@ class UIStyles:
         'xl': 16
     }
 
-    # 字体系统（延迟创建，避免在没有tkinter root时出错）
+    # 字体系统（系统 UI 字体，对齐 cc-switch / -apple-system 栈）
     fonts = {
-        'header': lambda: ctk.CTkFont(size=16, weight='bold'),
-        'subheader': lambda: ctk.CTkFont(size=14, weight='semibold'),
-        'body': lambda: ctk.CTkFont(size=13),
-        'body_bold': lambda: ctk.CTkFont(size=13, weight='bold'),
-        'caption': lambda: ctk.CTkFont(size=11),
-        'caption_bold': lambda: ctk.CTkFont(size=11, weight='bold')
+        'header': lambda: _ctk_ui_font(16, "bold"),
+        'subheader': lambda: _ctk_ui_font(14, "bold"),
+        'body': lambda: _ctk_ui_font(13),
+        'body_bold': lambda: _ctk_ui_font(13, "bold"),
+        'caption': lambda: _ctk_ui_font(11),
+        'caption_bold': lambda: _ctk_ui_font(11, "bold"),
     }
 
 # 获取资源路径（支持打包后的环境）
@@ -134,10 +152,9 @@ def _pil_sidebar_icon(kind: str, color_hex: str, size: int = 24):
     fill = rgb + (255,)
     im = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     dr = ImageDraw.Draw(im)
-    lw = max(2, round(size / 11))
+    lw = max(1, round(size / 13))
     s = float(size)
     m = round(s * 0.14)
-
     def rr(xy, radius, **kw):
         try:
             dr.rounded_rectangle(xy, radius=radius, **kw)
@@ -146,8 +163,8 @@ def _pil_sidebar_icon(kind: str, color_hex: str, size: int = 24):
 
     if kind == "gear":
         cx, cy = s / 2, s / 2
-        r_outer = s * 0.36
-        r_inner = s * 0.20
+        r_outer = s * 0.34
+        r_inner = s * 0.17
         dr.ellipse(
             [cx - r_outer, cy - r_outer, cx + r_outer, cy + r_outer],
             outline=fill,
@@ -158,51 +175,66 @@ def _pil_sidebar_icon(kind: str, color_hex: str, size: int = 24):
             outline=fill,
             width=lw,
         )
-        n = 8
+        n = 6
+        tooth = s * 0.11
         for i in range(n):
             a = (i * 2 * math.pi / n) - math.pi / 2
-            x0 = cx + (r_outer - lw) * math.cos(a)
-            y0 = cy + (r_outer - lw) * math.sin(a)
-            x1 = cx + (r_outer + s * 0.12) * math.cos(a)
-            y1 = cy + (r_outer + s * 0.12) * math.sin(a)
+            x0 = cx + (r_outer - lw * 0.5) * math.cos(a)
+            y0 = cy + (r_outer - lw * 0.5) * math.sin(a)
+            x1 = cx + (r_outer + tooth) * math.cos(a)
+            y1 = cy + (r_outer + tooth) * math.sin(a)
             dr.line([(x0, y0), (x1, y1)], fill=fill, width=lw)
 
     elif kind == "calendar":
-        x0, y0 = m, round(s * 0.22)
+        x0, y0 = m, round(s * 0.24)
         x1, y1 = size - m, size - m
-        rr([x0, y0, x1, y1], radius=3, outline=fill, width=lw)
-        y_split = y0 + round(s * 0.16)
-        dr.line([(x0, y_split), (x1, y_split)], fill=fill, width=lw)
-        dr.line([(round(s * 0.32), y0), (round(s * 0.32), y0 - round(s * 0.08))], fill=fill, width=lw)
-        dr.line([(round(s * 0.68), y0), (round(s * 0.68), y0 - round(s * 0.08))], fill=fill, width=lw)
-        rr(
-            [round(s * 0.26), round(s * 0.52), round(s * 0.40), round(s * 0.66)],
-            radius=1,
-            outline=fill,
-            width=max(1, lw - 1),
-        )
-        rr(
-            [round(s * 0.45), round(s * 0.52), round(s * 0.59), round(s * 0.66)],
-            radius=1,
-            outline=fill,
-            width=max(1, lw - 1),
-        )
+        rr([x0, y0, x1, y1], radius=max(2, lw), outline=fill, width=lw)
+        y_split = y0 + round(s * 0.15)
+        dr.line([(x0 + lw, y_split), (x1 - lw, y_split)], fill=fill, width=lw)
+        dr.line([(round(s * 0.34), y0), (round(s * 0.34), y0 - round(s * 0.09))], fill=fill, width=lw)
+        dr.line([(round(s * 0.66), y0), (round(s * 0.66), y0 - round(s * 0.09))], fill=fill, width=lw)
+        dot_r = max(1, round(s * 0.045))
+        for gx, gy in (
+            (0.30, 0.58),
+            (0.50, 0.58),
+            (0.70, 0.58),
+            (0.30, 0.74),
+            (0.50, 0.74),
+            (0.70, 0.74),
+        ):
+            cx, cy = round(s * gx), round(s * gy)
+            dr.ellipse([cx - dot_r, cy - dot_r, cx + dot_r, cy + dot_r], outline=fill, width=1)
 
     elif kind == "chip":
-        body = [round(s * 0.28), round(s * 0.28), round(s * 0.72), round(s * 0.72)]
-        rr(body, radius=3, outline=fill, width=lw)
-        pin_h = max(2, round(s * 0.06))
-        for py in (round(s * 0.38), round(s * 0.48), round(s * 0.58)):
-            dr.rectangle([round(s * 0.16), py, round(s * 0.26), py + pin_h], outline=fill, width=1)
-            dr.rectangle([round(s * 0.74), py, round(s * 0.84), py + pin_h], outline=fill, width=1)
+        body = [round(s * 0.26), round(s * 0.30), round(s * 0.74), round(s * 0.70)]
+        rr(body, radius=max(2, lw + 1), outline=fill, width=lw)
+        pin_h = max(2, round(s * 0.055))
+        for py in (round(s * 0.40), round(s * 0.48), round(s * 0.56)):
+            dr.rectangle(
+                [round(s * 0.14), py, round(s * 0.24), py + pin_h],
+                outline=fill,
+                width=1,
+            )
+            dr.rectangle(
+                [round(s * 0.76), py, round(s * 0.86), py + pin_h],
+                outline=fill,
+                width=1,
+            )
+        # 内部线路示意
+        mid_y = round(s * 0.50)
+        dr.line(
+            [(round(s * 0.34), mid_y), (round(s * 0.66), mid_y)],
+            fill=fill,
+            width=max(1, lw - 1),
+        )
 
     elif kind == "chart":
         base = size - m
         dr.line([(m, base), (size - m, base)], fill=fill, width=lw)
         bars = [
-            [round(s * 0.22), round(s * 0.58), round(s * 0.34), base - lw],
-            [round(s * 0.42), round(s * 0.42), round(s * 0.54), base - lw],
-            [round(s * 0.62), round(s * 0.30), round(s * 0.74), base - lw],
+            [round(s * 0.24), round(s * 0.56), round(s * 0.33), base - lw],
+            [round(s * 0.42), round(s * 0.40), round(s * 0.51), base - lw],
+            [round(s * 0.60), round(s * 0.28), round(s * 0.69), base - lw],
         ]
         for bx in bars:
             rr(bx, radius=2, outline=fill, width=lw)
@@ -232,6 +264,7 @@ class Git2LogsGUI:
             self._current_theme = "dark"
             # 主题切换时需同步的控件（由各 Tab 构建时登记）
             self._theme_panels_main: list = []
+            self._theme_panels_card: list = []
             self._theme_entries_typed: list = []  # (widget, 'main'|'card')
             self._theme_comboboxes: list = []
             self._theme_outline_buttons: list = []
@@ -244,6 +277,7 @@ class Git2LogsGUI:
             self._sidebar_icon_by_tab: dict = {}
             self._sidebar_icon_assets: list = []
             self._sidebar_icon_pills: list = []
+            self._sidebar_pill_by_tab: dict = {}
             self._sidebar_icon_px = 22
             self._sidebar_icons_text_fallback = False
 
@@ -368,15 +402,47 @@ class Git2LogsGUI:
                 pass
             raise
 
-    def _sidebar_selected_bg(self):
-        """侧栏当前选中项背景（随深浅主题变化）。"""
-        return "#1E3A5F" if getattr(self, "_current_theme", "dark") == "dark" else "#C7D2FE"
+    def _apply_sidebar_pill_style(self, tab_name=None):
+        """侧栏图标胶囊：选中为细描边 + 微提亮的表面（参考 cc-switch 卡片选中态）。"""
+        pills = getattr(self, "_sidebar_pill_by_tab", None) or {}
+        if not pills:
+            return
+        c = self.styles.colors
+        ct = getattr(self, "current_tab", None)
+        names = [tab_name] if tab_name is not None and tab_name in pills else list(pills.keys())
+        for name in names:
+            pill = pills.get(name)
+            if not pill:
+                continue
+            sel = name == ct
+            try:
+                pill.configure(
+                    fg_color=c["bg_surface"] if sel else c["bg_card"],
+                    border_color=c["accent"] if sel else c["border"],
+                    border_width=2 if sel else 1,
+                )
+            except Exception:
+                pass
+
+    def _on_sidebar_enter_pill(self, tab_name):
+        if getattr(self, "current_tab", None) == tab_name:
+            return
+        pill = self._sidebar_pill_by_tab.get(tab_name)
+        if not pill:
+            return
+        try:
+            pill.configure(border_color=self.styles.colors["accent_hover"], border_width=2)
+        except Exception:
+            pass
+
+    def _on_sidebar_leave_pill(self, tab_name):
+        self._apply_sidebar_pill_style(tab_name)
 
     def _apply_sidebar_text_glyphs(self):
         """无 Pillow 时用单字占位，仍保持灰 / 强调色与选中态一致。"""
         ct = getattr(self, "current_tab", None)
         c = self.styles.colors
-        glyph_font = ctk.CTkFont(size=12, weight="bold")
+        glyph_font = _ctk_ui_font(12, "bold")
         for name, tpl in self._sidebar_btns.items():
             if len(tpl) < 4:
                 continue
@@ -444,7 +510,7 @@ class Git2LogsGUI:
     
     def _create_header(self, parent):
         """创建顶部 Header 栏（品牌名 + 版本信息）"""
-        header = ctk.CTkFrame(parent, fg_color="#111113", height=48, corner_radius=0)
+        header = ctk.CTkFrame(parent, fg_color=self.styles.colors["bg_main"], height=48, corner_radius=0)
         header.pack(fill="x", side="top")
         header.pack_propagate(False)
         self._header_frame = header
@@ -461,8 +527,8 @@ class Git2LogsGUI:
         left = ctk.CTkFrame(inner, fg_color="transparent")
         left.pack(side="left", fill="y")
         self._header_brand_lbl = ctk.CTkLabel(left,
-                     text="⬡  MIZUKI TOOLBOX",
-                     font=ctk.CTkFont(size=15, weight="bold"),
+                     text="MIZUKI TOOLBOX",
+                     font=_ctk_ui_font(15, "bold"),
                      text_color=self.styles.colors['text_primary'],
                      fg_color="transparent")
         self._header_brand_lbl.pack(side="left", pady=13)
@@ -472,7 +538,7 @@ class Git2LogsGUI:
         right.pack(side="right", fill="y")
         self._header_sub_lbl = ctk.CTkLabel(right,
                      text="GitLab 提交分析工具  v2.0",
-                     font=ctk.CTkFont(size=11),
+                     font=_ctk_ui_font(11),
                      text_color=self.styles.colors['text_tertiary'],
                      fg_color="transparent")
         self._header_sub_lbl.pack(side="right", pady=16)
@@ -487,6 +553,7 @@ class Git2LogsGUI:
         ]
 
         self._sidebar_icon_pills.clear()
+        self._sidebar_pill_by_tab.clear()
 
         # 顶部留白
         ctk.CTkLabel(parent, text="", height=12, fg_color="transparent").pack()
@@ -509,33 +576,28 @@ class Git2LogsGUI:
             icon_pill.pack(pady=(8, 2))
             icon_pill.pack_propagate(False)
             self._sidebar_icon_pills.append(icon_pill)
+            self._sidebar_pill_by_tab[tab_name] = icon_pill
 
             icon_lbl = ctk.CTkLabel(icon_pill, text="", fg_color="transparent")
             icon_lbl.pack(expand=True)
 
             text_lbl = ctk.CTkLabel(item_frame,
                                     text=label,
-                                    font=ctk.CTkFont(size=10),
+                                    font=_ctk_ui_font(10),
                                     text_color=self.styles.colors['text_secondary'],
                                     fg_color="transparent")
             text_lbl.pack(pady=(0, 10))
 
             for w in (item_frame, icon_pill, icon_lbl, text_lbl):
                 w.bind("<Button-1>", lambda e, n=tab_name: self._switch_tab(n))
-                w.bind("<Enter>",    lambda e, f=item_frame, n=tab_name: (
-                    f.configure(fg_color=self.styles.colors['hover'])
-                    if self.current_tab != n else None
-                ))
-                w.bind("<Leave>",    lambda e, f=item_frame, n=tab_name: (
-                    f.configure(fg_color=self._sidebar_selected_bg())
-                    if self.current_tab == n
-                    else f.configure(fg_color="transparent")
-                ))
+                w.bind("<Enter>", lambda e, n=tab_name: self._on_sidebar_enter_pill(n))
+                w.bind("<Leave>", lambda e, n=tab_name: self._on_sidebar_leave_pill(n))
 
             self._sidebar_btns[tab_name] = (item_frame, icon_lbl, text_lbl, kind)
             self.tab_buttons.append((tab_name, item_frame))
 
         self._rebuild_sidebar_icons()
+        self._apply_sidebar_pill_style()
 
         # 底部分隔线
         ctk.CTkFrame(parent, fg_color=self.styles.colors['border'], height=1, corner_radius=0).pack(
@@ -649,8 +711,8 @@ class Git2LogsGUI:
         """同步顶栏、侧栏、主布局与日志外框等与主题相关的硬编码表面色。"""
         c = self.styles.colors
         is_dark = self._current_theme == "dark"
-        header_bg = "#111113" if is_dark else "#EBEBEF"
-        sidebar_bg = "#1C1C1F" if is_dark else "#E4E4E9"
+        header_bg = c["bg_main"] if is_dark else "#EBEBEF"
+        sidebar_bg = c["bg_main"] if is_dark else "#E4E4E9"
 
         self.root.configure(bg=c['bg_main'])
         if hasattr(self, "_main_container"):
@@ -681,15 +743,8 @@ class Git2LogsGUI:
             self._header_sub_lbl.configure(text_color=c['text_tertiary'])
         if hasattr(self, "_sidebar_frame"):
             self._sidebar_frame.configure(fg_color=sidebar_bg)
-        for pill in getattr(self, "_sidebar_icon_pills", []):
-            try:
-                pill.configure(
-                    fg_color=c['bg_card'],
-                    border_color=c['border'],
-                )
-            except Exception:
-                pass
         self._rebuild_sidebar_icons()
+        self._apply_sidebar_pill_style()
 
         if hasattr(self, "_log_container"):
             self._log_container.configure(fg_color=c['bg_main'])
@@ -725,6 +780,10 @@ class Git2LogsGUI:
     def _track_panel_main(self, w):
         if w is not None:
             self._theme_panels_main.append(w)
+
+    def _track_panel_card(self, w):
+        if w is not None:
+            self._theme_panels_card.append(w)
 
     def _track_entry(self, w, surface='card'):
         if w is not None:
@@ -778,6 +837,11 @@ class Git2LogsGUI:
                 w.configure(fg_color=c['bg_main'])
             except Exception:
                 pass
+        for w in self._theme_panels_card:
+            try:
+                w.configure(fg_color=c['bg_card'], border_color=c['border'])
+            except Exception:
+                pass
         if hasattr(self, "_tab1_hint_frame"):
             try:
                 self._tab1_hint_frame.configure(fg_color=c['bg_main'], border_color=c['border'])
@@ -828,9 +892,15 @@ class Git2LogsGUI:
                 w.configure(text_color=c['text_primary'], fg_color=c['accent'])
             except Exception:
                 pass
+        surf = c['bg_surface']
         for w in self._theme_radio_buttons:
             try:
-                w.configure(text_color=c['text_primary'], fg_color=c['accent'])
+                w.configure(
+                    text_color=c['text_primary'],
+                    fg_color=c['accent'],
+                    hover_color=c['accent_hover'],
+                    bg_color=surf,
+                )
             except Exception:
                 pass
         if hasattr(self, "_project_checkbox_frame"):
@@ -844,8 +914,10 @@ class Git2LogsGUI:
         if hasattr(self, "_format_options_scroll"):
             try:
                 self._format_options_scroll.configure(
-                    scrollbar_button_color=c['bg_main'],
-                    scrollbar_button_hover_color=c['bg_main'],
+                    fg_color=c['bg_surface'],
+                    scrollbar_fg_color=c['bg_card'],
+                    scrollbar_button_color=c['bg_surface'],
+                    scrollbar_button_hover_color=c['hover'],
                 )
             except Exception:
                 pass
@@ -1357,16 +1429,22 @@ class Git2LogsGUI:
         
         row = 0
         
-        # 日期范围卡片
-        date_card = ctk.CTkFrame(content, fg_color=self.bg_main, corner_radius=10)
+        # 日期范围卡片（抬高卡片 + 细边框，对齐 cc-switch card）
+        date_card = ctk.CTkFrame(
+            content,
+            fg_color=self.bg_card,
+            corner_radius=12,
+            border_width=1,
+            border_color=self.border_color,
+        )
         date_card.grid(row=row, column=0, sticky="ew", pady=(0, 20))
         date_card.columnconfigure(1, weight=1)
-        self._track_panel_main(date_card)
+        self._track_panel_card(date_card)
         content.columnconfigure(0, weight=1)  # 确保内容容器自适应
         
         date_title = ctk.CTkLabel(date_card,
                                 text="日期范围",
-                                font=ctk.CTkFont(size=15, weight="bold"),
+                                font=self.styles.fonts["subheader"](),
                                 text_color=self.text_primary,
                                 anchor="w")
         date_title.grid(row=0, column=0, columnspan=2, sticky="w", padx=20, pady=(20, 16))
@@ -1443,15 +1521,21 @@ class Git2LogsGUI:
         row += 1
         
         # 输出格式卡片
-        format_card = ctk.CTkFrame(content, fg_color=self.bg_main, corner_radius=10)
+        format_card = ctk.CTkFrame(
+            content,
+            fg_color=self.bg_card,
+            corner_radius=12,
+            border_width=1,
+            border_color=self.border_color,
+        )
         format_card.grid(row=row, column=0, sticky="ew", pady=(0, 20))
         format_card.columnconfigure(0, weight=1)
         format_card.rowconfigure(1, weight=0)
-        self._track_panel_main(format_card)
+        self._track_panel_card(format_card)
         
         format_title = ctk.CTkLabel(format_card,
                                   text="输出格式",
-                                  font=ctk.CTkFont(size=15, weight="bold"),
+                                  font=self.styles.fonts["subheader"](),
                                   text_color=self.text_primary,
                                   anchor="w")
         format_title.grid(row=0, column=0, sticky="w", padx=20, pady=(20, 16))
@@ -1470,43 +1554,54 @@ class Git2LogsGUI:
         
         fmt_scroll = ctk.CTkScrollableFrame(
             format_card,
-            fg_color="transparent",
+            fg_color=self.styles.colors["bg_surface"],
             height=220,
-            corner_radius=0,
+            corner_radius=8,
         )
         fmt_scroll.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 16))
         self._format_options_scroll = fmt_scroll
         try:
             fmt_scroll.configure(
-                scrollbar_button_color=self.styles.colors['bg_main'],
-                scrollbar_button_hover_color=self.styles.colors['bg_main'],
+                scrollbar_fg_color=self.styles.colors["bg_card"],
+                scrollbar_button_color=self.styles.colors["bg_surface"],
+                scrollbar_button_hover_color=self.styles.colors["hover"],
             )
         except Exception:
             pass
         
         for text, value in format_options:
-            rb = ctk.CTkRadioButton(fmt_scroll,
-                                  text=text,
-                                  variable=self.output_format,
-                                  value=value,
-                                  font=ctk.CTkFont(size=13),
-                                  text_color=self.text_primary,
-                                  fg_color=self.accent_color,
-                                  corner_radius=4)
-            rb.pack(anchor="w", padx=4, pady=6)
+            rb = ctk.CTkRadioButton(
+                fmt_scroll,
+                text=text,
+                variable=self.output_format,
+                value=value,
+                font=self.styles.fonts["body"](),
+                text_color=self.text_primary,
+                fg_color=self.accent_color,
+                hover_color=self.styles.colors["accent_hover"],
+                bg_color=self.styles.colors["bg_surface"],
+                corner_radius=4,
+            )
+            rb.pack(anchor="w", padx=10, pady=5)
             self._track_format_radio(rb)
         
         row += 1
         
         # 输出设置卡片
-        output_card = ctk.CTkFrame(content, fg_color=self.bg_main, corner_radius=10)
+        output_card = ctk.CTkFrame(
+            content,
+            fg_color=self.bg_card,
+            corner_radius=12,
+            border_width=1,
+            border_color=self.border_color,
+        )
         output_card.grid(row=row, column=0, sticky="ew", pady=(0, 0))
         output_card.columnconfigure(0, weight=1)
-        self._track_panel_main(output_card)
+        self._track_panel_card(output_card)
         
         output_title = ctk.CTkLabel(output_card,
                                   text="输出设置",
-                                  font=ctk.CTkFont(size=15, weight="bold"),
+                                  font=self.styles.fonts["subheader"](),
                                   text_color=self.text_primary,
                                   anchor="w")
         output_title.grid(row=0, column=0, sticky="w", padx=20, pady=(20, 16))
@@ -1604,10 +1699,16 @@ class Git2LogsGUI:
         row += 1
         
         # AI配置区域（默认隐藏）
-        self.ai_config_frame = ctk.CTkFrame(content, fg_color=self.bg_main, corner_radius=10)
+        self.ai_config_frame = ctk.CTkFrame(
+            content,
+            fg_color=self.bg_card,
+            corner_radius=12,
+            border_width=1,
+            border_color=self.border_color,
+        )
         self.ai_config_frame.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 0))
         self.ai_config_frame.columnconfigure(1, weight=1)
-        self._track_panel_main(self.ai_config_frame)
+        self._track_panel_card(self.ai_config_frame)
         
         ai_title = ctk.CTkLabel(self.ai_config_frame,
                               text="AI配置",
@@ -1768,10 +1869,16 @@ class Git2LogsGUI:
         row = 0
 
         # ── 数据来源状态卡片 ──────────────────────────────
-        status_card = ctk.CTkFrame(content, fg_color=self.bg_main, corner_radius=10)
+        status_card = ctk.CTkFrame(
+            content,
+            fg_color=self.bg_card,
+            corner_radius=12,
+            border_width=1,
+            border_color=self.border_color,
+        )
         status_card.grid(row=row, column=0, sticky="ew", pady=(0, 20))
         status_card.columnconfigure(0, weight=1)
-        self._track_panel_main(status_card)
+        self._track_panel_card(status_card)
 
         excel_status_hdr = ctk.CTkLabel(status_card,
                      text="工时数据来源",
@@ -1811,10 +1918,16 @@ class Git2LogsGUI:
         row += 1
 
         # ── 模板文件 ─────────────────────────────────────
-        tmpl_card = ctk.CTkFrame(content, fg_color=self.bg_main, corner_radius=10)
+        tmpl_card = ctk.CTkFrame(
+            content,
+            fg_color=self.bg_card,
+            corner_radius=12,
+            border_width=1,
+            border_color=self.border_color,
+        )
         tmpl_card.grid(row=row, column=0, sticky="ew", pady=(0, 20))
         tmpl_card.columnconfigure(0, weight=1)
-        self._track_panel_main(tmpl_card)
+        self._track_panel_card(tmpl_card)
 
         tmpl_hdr = ctk.CTkLabel(tmpl_card,
                      text="Excel 模板文件",
@@ -1868,10 +1981,16 @@ class Git2LogsGUI:
         row += 1
 
         # ── 项目选择 ─────────────────────────────────────
-        proj_card = ctk.CTkFrame(content, fg_color=self.bg_main, corner_radius=10)
+        proj_card = ctk.CTkFrame(
+            content,
+            fg_color=self.bg_card,
+            corner_radius=12,
+            border_width=1,
+            border_color=self.border_color,
+        )
         proj_card.grid(row=row, column=0, sticky="ew", pady=(0, 20))
         proj_card.columnconfigure(0, weight=1)
-        self._track_panel_main(proj_card)
+        self._track_panel_card(proj_card)
 
         # 标题行 + 全选/全不选按钮
         proj_title_frame = ctk.CTkFrame(proj_card, fg_color="transparent")
@@ -1936,10 +2055,16 @@ class Git2LogsGUI:
         row += 1
 
         # ── 输出文件 ─────────────────────────────────────
-        out_card = ctk.CTkFrame(content, fg_color=self.bg_main, corner_radius=10)
+        out_card = ctk.CTkFrame(
+            content,
+            fg_color=self.bg_card,
+            corner_radius=12,
+            border_width=1,
+            border_color=self.border_color,
+        )
         out_card.grid(row=row, column=0, sticky="ew", pady=(0, 20))
         out_card.columnconfigure(0, weight=1)
-        self._track_panel_main(out_card)
+        self._track_panel_card(out_card)
 
         out_hdr = ctk.CTkLabel(out_card,
                      text="输出 Excel 文件",
@@ -2316,17 +2441,17 @@ class Git2LogsGUI:
         ctk.set_appearance_mode("dark")
         # 更新样式常量
         UIStyles.colors.update({
-            'bg_main': "#18181B",
-            'bg_card': "#27272A",
-            'bg_surface': "#1F1F23",
-            'text_primary': "#F4F4F5",
+            'bg_main': "#1D1D20",
+            'bg_card': "#26262A",
+            'bg_surface': "#2B2B30",
+            'text_primary': "#FAFAFA",
             'text_secondary': "#A1A1AA",
             'text_tertiary': "#71717A",
-            'border': "#3F3F46",
-            'hover': "#374151",
+            'border': "#3D3D44",
+            'hover': "#34343A",
             'success_hover': "#059669",
             'error_hover': "#DC2626",
-            'accent_hover': "#2563EB",
+            'accent_hover': "#1E88E5",
         })
         # 同步旧属性别名
         self._sync_color_aliases()
@@ -2347,14 +2472,14 @@ class Git2LogsGUI:
         ctk.set_appearance_mode("light")
         # 更新样式常量为浅色
         UIStyles.colors.update({
-            'bg_main': "#F8F8F8",
+            'bg_main': "#FFFFFF",
             'bg_card': "#FFFFFF",
-            'bg_surface': "#F0F0F0",
+            'bg_surface': "#F4F4F5",
             'text_primary': "#18181B",
-            'text_secondary': "#52525B",
-            'text_tertiary': "#71717A",
-            'border': "#D4D4D8",
-            'hover': "#E4E4E7",
+            'text_secondary': "#71717A",
+            'text_tertiary': "#A1A1AA",
+            'border': "#E4E4E7",
+            'hover': "#F4F4F5",
             'success_hover': "#047857",
             'error_hover': "#B91C1C",
             'accent_hover': "#1D4ED8",
@@ -2476,19 +2601,19 @@ class Git2LogsGUI:
                 self.tab_frames[tab_name].pack(fill="x", expand=False, padx=20, pady=20)
                 self.current_tab = tab_name
             
-            # 更新侧边栏导航高亮（图标用 CTkImage 灰/强调色切换）
+            # 更新侧边栏：整行透明，选中态在图标胶囊描边 + 文案强调色
             if hasattr(self, '_sidebar_btns'):
                 for name, tpl in self._sidebar_btns.items():
                     if len(tpl) < 3:
                         continue
-                    item_frame, icon_lbl, text_lbl = tpl[0], tpl[1], tpl[2]
+                    item_frame, _icon_lbl, text_lbl = tpl[0], tpl[1], tpl[2]
+                    item_frame.configure(fg_color="transparent")
                     if name == tab_name:
-                        item_frame.configure(fg_color=self._sidebar_selected_bg())
                         text_lbl.configure(text_color=self.styles.colors['accent'])
                     else:
-                        item_frame.configure(fg_color="transparent")
                         text_lbl.configure(text_color=self.styles.colors['text_secondary'])
                 self._apply_sidebar_icon_images()
+                self._apply_sidebar_pill_style()
             
             # 立即滚动到顶部（兼容不同版本的 CTkScrollableFrame）
             if hasattr(self, 'scroll_container'):
