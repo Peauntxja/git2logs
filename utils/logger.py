@@ -8,8 +8,10 @@ import sys
 from typing import Optional, Callable
 from pathlib import Path
 
+LOG_FORMAT = '%(asctime)s - %(levelname)s - %(message)s'
+LOG_DATEFMT = '%Y-%m-%d %H:%M:%S'
 
-# 日志颜色代码（ANSI）
+
 class LogColors:
     """日志颜色常量（用于终端输出）"""
     RESET = '\033[0m'
@@ -64,41 +66,44 @@ class UnifiedLogger:
         if not self.logger.handlers:
             self.logger.setLevel(level)
 
+    def _safe_gui_callback(self, message: str, log_type: str):
+        """安全调用 GUI 回调，防止回调异常影响日志流程"""
+        if not self.gui_callback:
+            return
+        try:
+            self.gui_callback(message, log_type)
+        except Exception:
+            pass
+
     def debug(self, message: str):
         """调试级别日志"""
         self.logger.debug(message)
-        if self.gui_callback:
-            self.gui_callback(message, "debug")
+        self._safe_gui_callback(message, "debug")
 
     def info(self, message: str):
         """信息级别日志"""
         self.logger.info(message)
-        if self.gui_callback:
-            self.gui_callback(message, "info")
+        self._safe_gui_callback(message, "info")
 
     def success(self, message: str):
         """成功级别日志（映射到 INFO）"""
         self.logger.info(message)
-        if self.gui_callback:
-            self.gui_callback(message, "success")
+        self._safe_gui_callback(message, "success")
 
     def warning(self, message: str):
         """警告级别日志"""
         self.logger.warning(message)
-        if self.gui_callback:
-            self.gui_callback(message, "warning")
+        self._safe_gui_callback(message, "warning")
 
     def error(self, message: str, exc_info: bool = False):
         """错误级别日志"""
         self.logger.error(message, exc_info=exc_info)
-        if self.gui_callback:
-            self.gui_callback(message, "error")
+        self._safe_gui_callback(message, "error")
 
     def critical(self, message: str):
         """严重错误级别日志"""
         self.logger.critical(message)
-        if self.gui_callback:
-            self.gui_callback(message, "error")
+        self._safe_gui_callback(message, "error")
 
 
 def setup_logger(
@@ -143,16 +148,9 @@ def setup_logger(
     # 格式化器
     if use_colors and sys.stdout.isatty():
         # 终端支持颜色
-        formatter = ColoredFormatter(
-            '%(asctime)s - %(levelname)s - %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
+        formatter = ColoredFormatter(LOG_FORMAT, datefmt=LOG_DATEFMT)
     else:
-        # 不使用颜色
-        formatter = logging.Formatter(
-            '%(asctime)s - %(levelname)s - %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
+        formatter = logging.Formatter(LOG_FORMAT, datefmt=LOG_DATEFMT)
 
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
@@ -167,10 +165,7 @@ def setup_logger(
         file_handler.setLevel(level)
 
         # 文件输出不使用颜色
-        file_formatter = logging.Formatter(
-            '%(asctime)s - %(levelname)s - %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
+        file_formatter = logging.Formatter(LOG_FORMAT, datefmt=LOG_DATEFMT)
         file_handler.setFormatter(file_formatter)
         logger.addHandler(file_handler)
 

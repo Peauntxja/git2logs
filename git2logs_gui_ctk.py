@@ -21,6 +21,12 @@ import subprocess
 from pathlib import Path
 from datetime import datetime
 
+import logging
+
+from config import AIConfig, GUIConfig, ReportConfig
+
+logger = logging.getLogger(__name__)
+
 
 def _ui_font_family():
     """与 cc-switch 一致的系统无衬线栈在 Tk 中的首选族名（见 tailwind fontFamily.sans）。"""
@@ -61,6 +67,10 @@ class UIStyles:
         'success_hover': "#059669",
         'error_hover': "#DC2626",
         'accent_hover': "#1E88E5",
+        'sidebar_bg': "#1C1C1F",
+        'sidebar_active': "#2C2C30",
+        'chrome_border_light': "#EBEBEF",
+        'chrome_border_dark': "#E4E4E9",
     }
 
     # 间距系统 (基于8px网格)
@@ -261,6 +271,10 @@ class Git2LogsGUI:
             self._project_checkboxes: dict = {}  # 项目名 -> BooleanVar
             self._validation_labels: dict = {}  # 字段名 -> 校验提示 CTkLabel
             self._log_collapsed = False
+            self._log_filter_level = "全部"
+            self._log_pending = []
+            self._log_flush_scheduled = False
+            self._log_omitted_total = 0
             self._current_theme = "dark"
             # 主题切换时需同步的控件（由各 Tab 构建时登记）
             self._theme_panels_main: list = []
@@ -330,7 +344,7 @@ class Git2LogsGUI:
             self._body_frame = body_frame
 
             # 侧边栏（固定宽度76px）
-            self._sidebar_frame = ctk.CTkFrame(body_frame, fg_color="#1C1C1F", corner_radius=0, width=76)
+            self._sidebar_frame = ctk.CTkFrame(body_frame, fg_color=self.styles.colors['sidebar_bg'], corner_radius=0, width=76)
             self._sidebar_frame.pack(side="left", fill="y")
             self._sidebar_frame.pack_propagate(False)
 
@@ -356,7 +370,7 @@ class Git2LogsGUI:
                 self.scroll_container.configure(scrollbar_button_color=self.styles.colors['bg_main'],
                                                 scrollbar_button_hover_color=self.styles.colors['bg_main'])
             except Exception:
-                pass
+                logger.debug("配置滚动容器滚动条颜色失败")
             
             # 延迟并批量创建标签页内容（消除渲染毛刺）
             def delayed_init():
@@ -399,7 +413,7 @@ class Git2LogsGUI:
             try:
                 messagebox.showerror("初始化错误", error_msg)
             except Exception:
-                pass
+                logger.debug("显示初始化错误对话框失败")
             raise
 
     def _apply_sidebar_pill_style(self, tab_name=None):
@@ -422,7 +436,7 @@ class Git2LogsGUI:
                     border_width=2 if sel else 1,
                 )
             except Exception:
-                pass
+                logger.debug("配置侧栏胶囊样式失败")
 
     def _on_sidebar_enter_pill(self, tab_name):
         if getattr(self, "current_tab", None) == tab_name:
@@ -433,7 +447,7 @@ class Git2LogsGUI:
         try:
             pill.configure(border_color=self.styles.colors["accent_hover"], border_width=2)
         except Exception:
-            pass
+            logger.debug("配置侧栏悬停胶囊样式失败")
 
     def _on_sidebar_leave_pill(self, tab_name):
         self._apply_sidebar_pill_style(tab_name)
@@ -455,9 +469,9 @@ class Git2LogsGUI:
                 try:
                     icon_lbl.configure(text=g, text_color=col, font=glyph_font)
                 except Exception:
-                    pass
+                    logger.debug("配置侧栏图标文字(降级)失败")
             except Exception:
-                pass
+                logger.debug("配置侧栏图标文字失败")
 
     def _apply_sidebar_icon_images(self):
         """按 current_tab 切换侧栏图标（灰 / 强调色）；文字回退模式走字形着色。"""
@@ -478,7 +492,7 @@ class Git2LogsGUI:
             try:
                 icon_lbl.configure(image=img_a if name == ct else img_m, text="")
             except Exception:
-                pass
+                logger.debug("配置侧栏图标图片失败")
 
     def _rebuild_sidebar_icons(self):
         """按当前主题重绘侧栏矢量图标（PIL → CTkImage）。"""
@@ -626,6 +640,25 @@ class Git2LogsGUI:
 
         tf_right = ctk.CTkFrame(log_title_frame, fg_color="transparent")
         tf_right.pack(side="right", padx=0, pady=4)
+
+        self._log_filter_btn = ctk.CTkSegmentedButton(
+            tf_right,
+            values=["全部", "警告+错误", "仅错误"],
+            command=self._on_log_filter_change,
+            width=200,
+            height=28,
+            font=self.styles.fonts['caption'](),
+            corner_radius=self.styles.radius['sm'],
+            fg_color=self.styles.colors['bg_card'],
+            selected_color=self.styles.colors['accent'],
+            selected_hover_color=self.styles.colors['accent'],
+            unselected_color=self.styles.colors['bg_card'],
+            unselected_hover_color=self.styles.colors['hover'],
+            text_color=self.styles.colors['text_primary'],
+        )
+        self._log_filter_btn.set("全部")
+        self._log_filter_btn.pack(side="right", padx=(0, 8))
+
         self._log_toggle_btn = ctk.CTkButton(
             tf_right,
             text="收起",
@@ -688,6 +721,10 @@ class Git2LogsGUI:
             self._log_card.pack(fill="x", padx=20, pady=(0, 0))
             self._log_toggle_btn.configure(text="收起")
 
+    def _on_log_filter_change(self, value):
+        """日志等级筛选按钮回调，更新筛选级别。"""
+        self._log_filter_level = value
+
     def _refresh_log_widget_theme(self):
         """根据当前 UIStyles 同步 Tk 日志控件与标签颜色。"""
         if not hasattr(self, "log_text"):
@@ -706,13 +743,14 @@ class Git2LogsGUI:
         self.log_text.tag_config("warning", foreground=c['warning'])
         self.log_text.tag_config("info", foreground=c['text_primary'])
         self.log_text.tag_config("timestamp", foreground=c['text_secondary'])
+        self.log_text.tag_config("truncated", foreground=c['text_secondary'], justify="center")
 
     def _refresh_chrome_for_theme(self):
         """同步顶栏、侧栏、主布局与日志外框等与主题相关的硬编码表面色。"""
         c = self.styles.colors
         is_dark = self._current_theme == "dark"
-        header_bg = c["bg_main"] if is_dark else "#EBEBEF"
-        sidebar_bg = c["bg_main"] if is_dark else "#E4E4E9"
+        header_bg = c["bg_main"] if is_dark else c["chrome_border_light"]
+        sidebar_bg = c["sidebar_bg"]
 
         self.root.configure(bg=c['bg_main'])
         if hasattr(self, "_main_container"):
@@ -731,7 +769,7 @@ class Git2LogsGUI:
                     scrollbar_button_hover_color=c['bg_main'],
                 )
             except Exception:
-                pass
+                logger.debug("主题更新: 配置滚动条颜色失败")
 
         if hasattr(self, "_header_frame"):
             self._header_frame.configure(fg_color=header_bg)
@@ -763,6 +801,15 @@ class Git2LogsGUI:
                 hover_color=c['hover'],
                 border_color=c['border'],
             )
+        if hasattr(self, "_log_filter_btn"):
+            self._log_filter_btn.configure(
+                fg_color=c['bg_card'],
+                selected_color=c['accent'],
+                selected_hover_color=c['accent'],
+                unselected_color=c['bg_card'],
+                unselected_hover_color=c['hover'],
+                text_color=c['text_primary'],
+            )
         if hasattr(self, "_theme_btn"):
             self._theme_btn.configure(
                 fg_color=c['bg_card'],
@@ -774,7 +821,7 @@ class Git2LogsGUI:
             try:
                 self._run_progress.configure(progress_color=c['accent'])
             except Exception:
-                pass
+                logger.debug("主题更新: 配置进度条颜色失败")
         self._refresh_content_theme()
 
     def _track_panel_main(self, w):
@@ -826,7 +873,7 @@ class Git2LogsGUI:
                 try:
                     w.configure(text_color=c['text_primary'], fg_color=c['accent'])
                 except Exception:
-                    pass
+                    logger.debug("主题更新: 配置项目复选框样式失败")
 
     def _refresh_content_theme(self):
         """同步各 Tab 内卡片、输入框、次要按钮等与当前主题一致。"""
@@ -836,23 +883,23 @@ class Git2LogsGUI:
             try:
                 w.configure(fg_color=c['bg_main'])
             except Exception:
-                pass
+                logger.debug("主题更新: 配置主面板背景失败")
         for w in self._theme_panels_card:
             try:
                 w.configure(fg_color=c['bg_card'], border_color=c['border'])
             except Exception:
-                pass
+                logger.debug("主题更新: 配置卡片面板样式失败")
         if hasattr(self, "_tab1_hint_frame"):
             try:
                 self._tab1_hint_frame.configure(fg_color=c['bg_main'], border_color=c['border'])
             except Exception:
-                pass
+                logger.debug("主题更新: 配置提示框样式失败")
         for w, surf in self._theme_entries_typed:
             try:
                 fg = c['bg_main'] if surf == 'main' else c['bg_card']
                 w.configure(fg_color=fg, border_color=c['border'], text_color=c['text_primary'])
             except Exception:
-                pass
+                logger.debug("主题更新: 配置输入框样式失败")
         for w in self._theme_comboboxes:
             try:
                 w.configure(
@@ -866,7 +913,7 @@ class Git2LogsGUI:
                     dropdown_hover_color=ho,
                 )
             except Exception:
-                pass
+                logger.debug("主题更新: 配置下拉框样式失败")
         for w in self._theme_outline_buttons:
             try:
                 w.configure(
@@ -876,22 +923,22 @@ class Git2LogsGUI:
                     border_color=c['border'],
                 )
             except Exception:
-                pass
+                logger.debug("主题更新: 配置轮廓按钮样式失败")
         for w in self._theme_labels_primary:
             try:
                 w.configure(text_color=c['text_primary'])
             except Exception:
-                pass
+                logger.debug("主题更新: 配置主标签文字颜色失败")
         for w in self._theme_labels_secondary:
             try:
                 w.configure(text_color=c['text_secondary'])
             except Exception:
-                pass
+                logger.debug("主题更新: 配置次要标签文字颜色失败")
         for w in self._theme_check_radio:
             try:
                 w.configure(text_color=c['text_primary'], fg_color=c['accent'])
             except Exception:
-                pass
+                logger.debug("主题更新: 配置选择控件样式失败")
         surf = c['bg_surface']
         for w in self._theme_radio_buttons:
             try:
@@ -902,14 +949,14 @@ class Git2LogsGUI:
                     bg_color=surf,
                 )
             except Exception:
-                pass
+                logger.debug("主题更新: 配置单选按钮样式失败")
         if hasattr(self, "_project_checkbox_frame"):
             for w in self._project_checkbox_frame.winfo_children():
                 if isinstance(w, ctk.CTkLabel):
                     try:
                         w.configure(text_color=c['text_secondary'])
                     except Exception:
-                        pass
+                        logger.debug("主题更新: 配置项目标签文字颜色失败")
         self._refresh_project_cb_theme()
         if hasattr(self, "_format_options_scroll"):
             try:
@@ -920,17 +967,17 @@ class Git2LogsGUI:
                     scrollbar_button_hover_color=c['hover'],
                 )
             except Exception:
-                pass
+                logger.debug("主题更新: 配置格式选项滚动区域样式失败")
         if hasattr(self, "_bottom_separator"):
             try:
                 self._bottom_separator.configure(fg_color=c['border'])
             except Exception:
-                pass
+                logger.debug("主题更新: 配置底部分隔线颜色失败")
         if hasattr(self, "_button_container_ref"):
             try:
                 self._button_container_ref.configure(fg_color=c['bg_main'])
             except Exception:
-                pass
+                logger.debug("主题更新: 配置按钮容器背景失败")
         if hasattr(self, "clear_btn"):
             try:
                 self.clear_btn.configure(
@@ -940,7 +987,7 @@ class Git2LogsGUI:
                     border_color=c['border'],
                 )
             except Exception:
-                pass
+                logger.debug("主题更新: 配置清除按钮样式失败")
         if hasattr(self, "ai_analysis_btn"):
             try:
                 self.ai_analysis_btn.configure(
@@ -950,7 +997,7 @@ class Git2LogsGUI:
                     border_color=c['border'],
                 )
             except Exception:
-                pass
+                logger.debug("主题更新: 配置AI分析按钮样式失败")
         if hasattr(self, "generate_btn"):
             try:
                 if getattr(self, "_is_running", False):
@@ -966,7 +1013,7 @@ class Git2LogsGUI:
                         text_color="white",
                     )
             except Exception:
-                pass
+                logger.debug("主题更新: 配置生成按钮样式失败")
         if hasattr(self, "_excel_export_btn"):
             try:
                 self._excel_export_btn.configure(
@@ -975,7 +1022,7 @@ class Git2LogsGUI:
                     text_color="#FFFFFF",
                 )
             except Exception:
-                pass
+                logger.debug("主题更新: 配置Excel导出按钮样式失败")
         self._sync_responsive_wraplengths()
 
     def _sync_responsive_wraplengths(self):
@@ -987,9 +1034,9 @@ class Git2LogsGUI:
                 try:
                     lbl.configure(wraplength=inner)
                 except Exception:
-                    pass
+                    logger.debug("配置标签换行宽度失败")
         except Exception:
-            pass
+            logger.debug("同步响应式换行宽度失败")
 
     def _on_keyboard_generate(self, event):
         """⌘+Return 触发生成（焦点在日志文本框内时不触发）。"""
@@ -1002,7 +1049,7 @@ class Git2LogsGUI:
             if isinstance(w, Text):
                 return
         except Exception:
-            pass
+            logger.debug("检测焦点控件类型失败")
         if getattr(self, "_is_running", False):
             return
         self.generate_logs()
@@ -1567,7 +1614,7 @@ class Git2LogsGUI:
                 scrollbar_button_hover_color=self.styles.colors["hover"],
             )
         except Exception:
-            pass
+            logger.debug("配置格式选项滚动条样式失败")
         
         for text, value in format_options:
             rb = ctk.CTkRadioButton(
@@ -1659,9 +1706,9 @@ class Git2LogsGUI:
         # 绑定输出格式变化事件
         def setup_output_format_trace():
             try:
-                self.output_format.trace('w', self.on_output_format_changed)
+                self.output_format.trace_add('write', self.on_output_format_changed)
             except Exception:
-                pass
+                logger.debug("绑定输出格式变化追踪失败")
         self.root.after(100, setup_output_format_trace)
         
         content.columnconfigure(0, weight=1)
@@ -2309,22 +2356,27 @@ class Git2LogsGUI:
             )
             self.log(f"导出成功：共写入 {count} 行任务数据", "success")
             self.log(f"文件已保存至: {output}", "success")
+            self._show_toast(f"Excel 导出成功（{count} 行）", "success")
             self.root.after(0, lambda: messagebox.showinfo(
                 "导出成功",
                 f"共写入 {count} 行任务数据\n\n文件路径:\n{output}",
             ))
         except ImportError as e:
             self.log(f"导出失败（缺少依赖）: {e}", "error")
+            self._show_toast("Excel 导出失败", "error")
             self.root.after(0, lambda: messagebox.showerror("依赖缺失", str(e)))
         except (ValueError, FileNotFoundError) as e:
             self.log(f"导出失败: {e}", "error")
+            self._show_toast("Excel 导出失败", "error")
             self.root.after(0, lambda: messagebox.showerror("导出失败", str(e)))
         except Exception as e:
             import traceback
             self.log(f"导出异常: {e}", "error")
             self.log(traceback.format_exc(), "error")
+            self._show_toast("Excel 导出异常", "error")
             self.root.after(0, lambda: messagebox.showerror("导出异常", str(e)))
         finally:
+            self._safe_button_operation("_excel_export_btn", lambda btn: btn.configure(text="导出到 Excel"))
             self._reset_button_state("_excel_export_btn")
 
     def _create_bottom_actions(self):
@@ -2384,7 +2436,7 @@ class Git2LogsGUI:
 
         # 主按钮 - 生成日志
         self.generate_btn = ctk.CTkButton(button_frame,
-                                        text="▶  生成日志",
+                                        text="▶  开始生成",
                                         height=44,
                                         font=self.styles.fonts['body_bold'](),
                                         corner_radius=self.styles.radius['md'],
@@ -2452,6 +2504,10 @@ class Git2LogsGUI:
             'success_hover': "#059669",
             'error_hover': "#DC2626",
             'accent_hover': "#1E88E5",
+            'sidebar_bg': "#1C1C1F",
+            'sidebar_active': "#2C2C30",
+            'chrome_border_light': "#3D3D44",
+            'chrome_border_dark': "#34343A",
         })
         # 同步旧属性别名
         self._sync_color_aliases()
@@ -2483,6 +2539,10 @@ class Git2LogsGUI:
             'success_hover': "#047857",
             'error_hover': "#B91C1C",
             'accent_hover': "#1D4ED8",
+            'sidebar_bg': "#F0F0F3",
+            'sidebar_active': "#E4E4E9",
+            'chrome_border_light': "#EBEBEF",
+            'chrome_border_dark': "#E4E4E9",
         })
         # 同步旧属性别名
         self._sync_color_aliases()
@@ -2508,7 +2568,7 @@ class Git2LogsGUI:
             try:
                 fn()
             except Exception:
-                pass
+                logger.debug(f"执行验证函数 {fn.__name__} 失败")
 
     def _sync_color_aliases(self):
         """同步旧属性别名与最新样式颜色"""
@@ -2537,6 +2597,39 @@ class Git2LogsGUI:
         dot = "●"
         self.status_indicator.configure(text=f"{dot} {message}", text_color=color)
 
+    def _show_toast(self, message: str, toast_type: str = "success"):
+        """显示顶部临时通知（线程安全）"""
+        if threading.current_thread() is not threading.main_thread():
+            self.root.after(0, lambda: self._show_toast(message, toast_type))
+            return
+
+        c = self.styles.colors
+        color_map = {
+            "success": c['success'],
+            "error": c['error'],
+            "warning": c['warning'],
+        }
+        bg = color_map.get(toast_type, c['success'])
+
+        toast = ctk.CTkFrame(self.root, fg_color=bg, corner_radius=self.styles.radius['md'])
+        label = ctk.CTkLabel(
+            toast, text=f"  {message}  ",
+            font=self.styles.fonts['body'](),
+            text_color="#FFFFFF",
+        )
+        label.pack(padx=16, pady=8)
+        toast.place(relx=0.5, rely=0, anchor="n", y=10)
+        toast.lift()
+
+        def _destroy():
+            try:
+                toast.place_forget()
+                toast.destroy()
+            except Exception:
+                pass
+
+        self.root.after(3000, _destroy)
+
     def _on_window_resize(self, event):
         """窗口大小变化时的响应式处理"""
         if event.widget != self.root:
@@ -2550,7 +2643,7 @@ class Git2LogsGUI:
             try:
                 self.root.after_cancel(self._resize_wrap_job)
             except Exception:
-                pass
+                logger.debug("取消延迟布局任务失败")
         self._resize_wrap_job = self.root.after(150, self._deferred_resize_layout)
 
     def _deferred_resize_layout(self):
@@ -2566,18 +2659,18 @@ class Git2LogsGUI:
         """切换运行状态，同步更新按钮和状态指示"""
         c = self.styles.colors
         if is_running:
-            self.generate_btn.configure(text="⏹ 停止", state="normal",
-                                       fg_color=c['error'],
-                                       hover_color=c['error_hover'])
+            self.generate_btn.configure(text="⏳ 生成中...", state="disabled",
+                                       fg_color=c['accent'],
+                                       hover_color=c['accent_hover'])
             self._update_status("正在生成日志…", "running")
             if hasattr(self, "_run_progress"):
                 try:
                     self._run_progress.pack(side="left", padx=(12, 0), pady=0)
                     self._run_progress.start()
                 except Exception:
-                    pass
+                    logger.debug("启动进度条动画失败")
         else:
-            self.generate_btn.configure(text="▶  生成日志", state="normal",
+            self.generate_btn.configure(text="▶  开始生成", state="normal",
                                        fg_color=c['success'],
                                        hover_color=c['success_hover'])
             self._update_status("就绪", "success")
@@ -2586,7 +2679,7 @@ class Git2LogsGUI:
                     self._run_progress.stop()
                     self._run_progress.pack_forget()
                 except Exception:
-                    pass
+                    logger.debug("停止进度条动画失败")
 
     def _switch_tab(self, tab_name):
         """切换标签页（Segmented Control 风格）"""
@@ -2623,7 +2716,7 @@ class Git2LogsGUI:
                     elif hasattr(self.scroll_container, '_canvas'):
                         self.scroll_container._canvas.yview_moveto(0)
                 except Exception:
-                    pass
+                    logger.debug("滚动容器滚动到顶部失败")
 
             # 切换到 Excel 导出页时刷新状态
             if tab_name == "Excel导出":
@@ -2685,7 +2778,7 @@ class Git2LogsGUI:
             
             self.ai_model_combo.configure(values=models)
         except Exception:
-            pass
+            logger.debug("更新AI模型下拉列表失败")
     
     def toggle_token_visibility(self, entry):
         """切换令牌显示/隐藏"""
@@ -2697,7 +2790,7 @@ class Git2LogsGUI:
             entry.focus_set()
             self.root.update_idletasks()
         except Exception:
-            pass
+            logger.debug("切换令牌可见性失败")
     
     def toggle_key_visibility(self, entry):
         """切换API Key显示/隐藏"""
@@ -2709,7 +2802,7 @@ class Git2LogsGUI:
             entry.focus_set()
             self.root.update_idletasks()
         except Exception:
-            pass
+            logger.debug("切换API Key可见性失败")
     
     def toggle_ai_config(self):
         """切换AI配置区域的显示/隐藏"""
@@ -2720,7 +2813,7 @@ class Git2LogsGUI:
                 self.ai_config_frame.grid_remove()
             self.root.update_idletasks()
         except Exception:
-            pass
+            logger.debug("切换AI配置区域显示失败")
     
     def toggle_date_inputs(self):
         """切换日期输入框的启用/禁用状态"""
@@ -2733,7 +2826,7 @@ class Git2LogsGUI:
                 self.until_entry.configure(state="normal")
             self.root.update_idletasks()
         except Exception:
-            pass
+            logger.debug("切换日期输入框状态失败")
     
     def on_output_format_changed(self, *args):
         """输出格式变化时的回调"""
@@ -2747,7 +2840,7 @@ class Git2LogsGUI:
                 self.output_hint.configure(text="提示: 生成的文件将保存到选择的目录")
             self.root.update_idletasks()
         except Exception:
-            pass
+            logger.debug("更新输出格式提示失败")
     
     def browse_output_file(self):
         """浏览输出目录（统一选择文件夹来存放生成的文件）"""
@@ -2764,89 +2857,97 @@ class Git2LogsGUI:
             messagebox.showerror("错误", f"选择目录失败: {str(e)}")
     
     def log(self, message, log_type="info"):
-        """添加日志消息（带颜色前缀）"""
+        """添加日志消息（带颜色前缀），通过批量刷新提升性能。"""
         try:
-            # Tk/CustomTkinter 不是线程安全的：任何 UI 更新必须在主线程执行。
-            # 否则在 macOS 上容易触发 Tcl_Panic / abort（尤其是多次生成、日志量较大时）。
             import threading
             if threading.current_thread() is not threading.main_thread():
                 try:
                     self.root.after(0, lambda: self.log(message, log_type))
                 except Exception:
-                    pass
+                    logger.debug("跨线程调度日志输出失败")
+                return
+
+            filter_level = self._log_filter_level
+            if filter_level == "警告+错误" and log_type not in ("warning", "error"):
+                return
+            if filter_level == "仅错误" and log_type != "error":
                 return
 
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            
-            # 根据类型添加颜色前缀
-            if log_type == "error":
-                prefix = f"[ERROR]"
-                color_tag = "error"
-            elif log_type == "success":
-                prefix = f"[SUCCESS]"
-                color_tag = "success"
-            elif log_type == "warning":
-                prefix = f"[WARNING]"
-                color_tag = "warning"
-            elif log_type == "info":
-                prefix = f"[INFO]"
-                color_tag = "info"
-            else:
-                prefix = ""
-                color_tag = "info"
-            
+
+            _PREFIX_MAP = {
+                "error": ("[ERROR]", "error"),
+                "success": ("[SUCCESS]", "success"),
+                "warning": ("[WARNING]", "warning"),
+                "info": ("[INFO]", "info"),
+            }
+            prefix, color_tag = _PREFIX_MAP.get(log_type, ("", "info"))
             log_message = f"{timestamp} - {prefix} {message}\n"
-            
-            # 插入文本
-            start_pos = self.log_text.index("end-1c")
-            self.log_text.insert("end", log_message)
-            
-            # 应用颜色标签（优化：利用预配置的标签，减少方法调用）
-            line_num = start_pos.split('.')[0]
-            
-            # 时间戳灰色
-            self.log_text.tag_add("timestamp", f"{line_num}.0", f"{line_num}.{len(timestamp)}")
-            
-            if prefix:
-                # 只对前缀部分应用颜色
-                prefix_start_idx = len(timestamp) + 3
-                self.log_text.tag_add(color_tag, 
-                                     f"{line_num}.{prefix_start_idx}", 
-                                     f"{line_num}.{prefix_start_idx + len(prefix)}")
-            
-            # 优化：只在必要时滚动到底部，减少更新频率
+
+            self._log_pending.append((log_message, timestamp, prefix, color_tag))
+
+            if not self._log_flush_scheduled:
+                self._log_flush_scheduled = True
+                self.root.after(200, self._flush_logs)
+        except Exception:
+            logger.debug("写入GUI日志失败")
+
+    def _flush_logs(self):
+        """批量写入所有待处理的日志消息，减少 UI 更新次数。"""
+        self._log_flush_scheduled = False
+        if not self._log_pending:
+            return
+        try:
+            if not hasattr(self, "log_text"):
+                return
+
+            pending = self._log_pending[:]
+            self._log_pending.clear()
+
             should_scroll = True
             try:
-                # 检查是否已经接近底部（在最后 3 行内）
-                last_line = self.log_text.index("end-1c")
-                last_line_num = int(last_line.split('.')[0])
-                visible_start = self.log_text.index("@0,0")
-                visible_end = self.log_text.index("@0,{}".format(self.log_text.winfo_height()))
-                visible_start_num = int(visible_start.split('.')[0])
-                visible_end_num = int(visible_end.split('.')[0])
-                
-                # 如果用户已经滚动到顶部或中间，不要自动滚动到底部
+                last_line_num = int(self.log_text.index("end-1c").split('.')[0])
+                visible_end_num = int(
+                    self.log_text.index("@0,{}".format(self.log_text.winfo_height())).split('.')[0]
+                )
                 if visible_end_num < last_line_num - 3:
                     should_scroll = False
             except Exception:
                 pass
-            
+
+            for log_message, timestamp, prefix, color_tag in pending:
+                start_pos = self.log_text.index("end-1c")
+                self.log_text.insert("end", log_message)
+
+                line_num = start_pos.split('.')[0]
+                self.log_text.tag_add("timestamp", f"{line_num}.0", f"{line_num}.{len(timestamp)}")
+
+                if prefix:
+                    prefix_start_idx = len(timestamp) + 3
+                    self.log_text.tag_add(
+                        color_tag,
+                        f"{line_num}.{prefix_start_idx}",
+                        f"{line_num}.{prefix_start_idx + len(prefix)}",
+                    )
+                self._log_count += 1
+
+            if self._log_count > 1000:
+                lines_to_delete = 100
+                self.log_text.delete("1.0", f"{lines_to_delete + 1}.0")
+                self._log_count -= lines_to_delete
+                self._log_omitted_total += lines_to_delete
+
+                separator = f"─── 已省略 {self._log_omitted_total} 条日志 ───\n"
+                self.log_text.insert("1.0", separator)
+                self.log_text.tag_add("truncated", "1.0", "1.end")
+                self._log_count += 1
+
             if should_scroll:
                 self.log_text.see("end")
-            
-            self._log_count += 1
-            
-            # 限制日志长度
-            if self._log_count > 1000:
-                self.log_text.delete(1.0, "100.0")
-                self._log_count = 900
-            
-            # 优化：大幅减少 update_idletasks 调用频率，避免卡顿
-            # 只有在非常大量的日志时才需要手动刷新，否则交给 Tkinter 的主循环即可
-            if self._log_count % 50 == 0:  # 降低频率到 50 条
-                self.root.update_idletasks()
+
+            self.root.update_idletasks()
         except Exception:
-            pass
+            logger.debug("批量写入GUI日志失败")
     
     def clear_logs(self):
         """清空日志"""
@@ -2856,14 +2957,16 @@ class Git2LogsGUI:
                 try:
                     self.root.after(0, self.clear_logs)
                 except Exception:
-                    pass
+                    logger.debug("跨线程调度清空日志失败")
                 return
 
             self.log_text.delete(1.0, "end")
             self._log_count = 0
+            self._log_omitted_total = 0
+            self._log_pending.clear()
             self.log("日志已清空", "info")
         except Exception:
-            pass
+            logger.debug("清空日志文本失败")
     
     def generate_logs(self):
         """生成日志的主函数"""
@@ -2888,6 +2991,99 @@ class Git2LogsGUI:
             self.log(f"启动生成任务失败: {str(e)}", "error")
             self._reset_button_state()
     
+    def _collect_report_params(self):
+        """从 GUI 控件收集报告生成参数，返回参数字典或 None（校验失败时）"""
+        from datetime import datetime, timezone
+        from models import ReportParams
+
+        gitlab_url = self.gitlab_url.get().strip()
+        token = self.token.get().strip()
+        author = self.author.get().strip()
+        repo = self.repo.get().strip()
+        branch = self.branch.get().strip() or None
+
+        placeholder_text = "https://gitlab.com 或 http://gitlab.yourcompany.com"
+        if gitlab_url == placeholder_text:
+            gitlab_url = ""
+
+        if not gitlab_url or not token or not author:
+            self.log("错误: 请填写GitLab URL、访问令牌和提交者", "error")
+            self.root.after(0, lambda: messagebox.showerror("错误", "请填写GitLab URL、访问令牌和提交者"))
+            return None
+
+        since_date = None
+        until_date = None
+
+        if self.use_today.get():
+            today_local = datetime.now()
+            since_date = today_local.strftime('%Y-%m-%d')
+            until_date = since_date
+        else:
+            since_str = self.since_date.get().strip()
+            until_str = self.until_date.get().strip()
+            if since_str and not until_str:
+                until_str = since_str
+            if until_str and not since_str:
+                since_str = until_str
+            since_date = since_str or None
+            until_date = until_str or None
+            if since_date and until_date:
+                try:
+                    datetime.strptime(since_date, '%Y-%m-%d')
+                    datetime.strptime(until_date, '%Y-%m-%d')
+                except ValueError as e:
+                    self.log(f"错误: 日期格式无效 - {str(e)}", "error")
+                    self.root.after(0, lambda: messagebox.showerror("错误", f"日期格式无效: {str(e)}"))
+                    return None
+
+        output_format = self.output_format.get() if hasattr(self, 'output_format') else "daily_report"
+
+        return ReportParams(
+            gitlab_url=gitlab_url,
+            token=token,
+            author=author,
+            since_date=since_date,
+            until_date=until_date,
+            branch=branch,
+            output_format=output_format,
+            output_path=self.output_file.get().strip() if hasattr(self, 'output_file') else '',
+            scan_all=self.scan_all.get() or not repo,
+            repo_url=repo,
+        )
+
+    def _setup_gui_log_handler(self):
+        """设置 GUI 日志重定向 handler，返回 (root_logger, gui_handler)"""
+        import logging as _logging
+
+        class _GUILogHandler(_logging.Handler):
+            def __init__(self, gui_log_func):
+                super().__init__()
+                self.gui_log_func = gui_log_func
+
+            def emit(self, record):
+                try:
+                    msg = self.format(record)
+                    log_type = "error" if record.levelno >= _logging.ERROR else "warning" if record.levelno >= _logging.WARNING else "info"
+                    self.gui_log_func(msg, log_type)
+                except Exception:
+                    pass
+
+        gui_handler = _GUILogHandler(self.log)
+        gui_handler.setLevel(_logging.INFO)
+        gui_handler.setFormatter(_logging.Formatter('%(levelname)s - %(message)s'))
+
+        root_logger = _logging.getLogger()
+        try:
+            if hasattr(self, "_gui_log_handler") and self._gui_log_handler in root_logger.handlers:
+                root_logger.removeHandler(self._gui_log_handler)
+        except Exception:
+            pass
+        root_logger.addHandler(gui_handler)
+        self._gui_log_handler = gui_handler
+        root_logger.setLevel(_logging.INFO)
+
+        return root_logger, gui_handler
+
     def _run_git2logs_direct(self):
         """在后台线程中执行git2logs（延迟导入模块以提高启动速度）"""
         root_logger = None
@@ -2901,7 +3097,7 @@ class Git2LogsGUI:
                 create_gitlab_client, scan_all_projects, get_commits_by_author,
                 group_commits_by_date, generate_markdown_log, generate_multi_project_markdown,
                 generate_daily_report, generate_statistics_report, generate_all_reports,
-                analyze_with_ai, generate_ai_analysis_report, generate_local_analysis_report,
+                analyze_with_ai, generate_ai_analysis_report,
                 extract_gitlab_url, parse_project_identifier
             )
             
@@ -2917,7 +3113,7 @@ class Git2LogsGUI:
                         log_type = "error" if record.levelno >= logging.ERROR else "warning" if record.levelno >= logging.WARNING else "info"
                         self.gui_log_func(msg, log_type)
                     except Exception:
-                        pass
+                        logger.debug("GUILogHandler发送日志到GUI失败")
             
             gui_handler = GUILogHandler(self.log)
             gui_handler.setLevel(logging.INFO)
@@ -2931,7 +3127,7 @@ class Git2LogsGUI:
                 if hasattr(self, "_gui_log_handler") and self._gui_log_handler in root_logger.handlers:
                     root_logger.removeHandler(self._gui_log_handler)
             except Exception:
-                pass
+                logger.debug("移除旧的GUI日志处理器失败")
             root_logger.addHandler(gui_handler)
             self._gui_log_handler = gui_handler
             root_logger.setLevel(logging.INFO)
@@ -3202,13 +3398,12 @@ class Git2LogsGUI:
                     report_content = generate_work_hours_report(
                         all_results, author,
                         since_date=since_date, until_date=until_date,
-                        daily_hours=8.0, branch=branch
+                        daily_hours=ReportConfig.DEFAULT_DAILY_HOURS, branch=branch
                     )
-                    # 缓存工时数据，供 Excel 导出使用
                     self._work_hours_data = calculate_work_hours(
                         all_results,
                         since_date=since_date, until_date=until_date,
-                        daily_hours=8.0, branch=branch
+                        daily_hours=ReportConfig.DEFAULT_DAILY_HOURS, branch=branch
                     )
                     self.log("工时数据已缓存，可在「Excel导出」标签页导出", "info")
                 else:
@@ -3257,7 +3452,7 @@ class Git2LogsGUI:
                 if gui_handler is not None and gui_handler in root_logger.handlers:
                     root_logger.removeHandler(gui_handler)
             except Exception:
-                pass
+                logger.debug("清理GUI日志处理器失败")
 
     def _reset_button_state(self, button_name="generate_btn"):
         """安全地重置按钮状态（线程安全）
@@ -3274,7 +3469,7 @@ class Git2LogsGUI:
             try:
                 self.root.after(0, lambda: self._set_running_state(False))
             except Exception:
-                pass
+                logger.debug("调度重置运行状态失败")
 
         if threading.current_thread() is threading.main_thread():
             reset()
@@ -3331,7 +3526,10 @@ class Git2LogsGUI:
             self.log("=" * 60, "info")
             self.log(f"选择的报告文件: {report_file}", "info")
             self.log("正在读取报告文件并发送给AI分析...", "info")
-            
+
+            self._ai_is_running = True
+            self._safe_button_operation("ai_analysis_btn", lambda btn: btn.configure(state="disabled", text="分析中..."))
+
             thread = threading.Thread(target=self._analyze_report_file_direct, args=(report_file,))
             thread.daemon = True
             thread.start()
@@ -3386,7 +3584,7 @@ class Git2LogsGUI:
             from ai_analysis import analyze_report_file
             from git2logs import generate_ai_analysis_report
             
-            analysis_result = analyze_report_file(report_content, ai_config, timeout=120)
+            analysis_result = analyze_report_file(report_content, ai_config, timeout=AIConfig.TIMEOUT)
             
             self.log("AI分析完成，正在生成报告...", "success")
             
@@ -3407,10 +3605,12 @@ class Git2LogsGUI:
             self.log("提示: 文件名包含 '_ai_analysis' 表示这是AI分析报告", "info")
             self.log("=" * 60, "info")
             self.log("AI分析完成！", "success")
+            self._show_toast("AI 分析完成", "success")
             
         except ImportError as e:
             self.log(f"AI分析功能不可用: {str(e)}", "error")
             self.log("提示: 请运行 'pip install openai anthropic google-generativeai' 安装AI服务库", "warning")
+            self._show_toast("AI 分析失败", "error")
             self.root.after(0, lambda: messagebox.showerror("错误", f"AI分析功能不可用: {str(e)}"))
         except TimeoutError as e:
             self.log(f"AI分析超时: {str(e)}", "error")
@@ -3419,23 +3619,27 @@ class Git2LogsGUI:
             self.log("  2. AI服务响应较慢", "warning")
             self.log("  3. 报告文件内容较大，处理时间较长", "warning")
             self.log("建议: 请检查网络连接，或稍后重试", "info")
+            self._show_toast("AI 分析超时", "error")
             self.root.after(0, lambda: messagebox.showerror("错误", f"AI分析超时: {str(e)}"))
         except ValueError as e:
             error_msg = str(e)
             self.log(f"AI分析失败（API密钥或配置问题）: {error_msg}", "error")
+            self._show_toast("AI 分析失败", "error")
             self.root.after(0, lambda: messagebox.showerror("错误", f"AI分析失败: {error_msg}"))
         except ConnectionError as e:
             error_msg = str(e)
             self.log(f"AI分析失败（网络连接问题）: {error_msg}", "error")
+            self._show_toast("AI 分析失败", "error")
             self.root.after(0, lambda: messagebox.showerror("错误", f"网络连接失败: {error_msg}"))
         except Exception as e:
             self.log(f"AI分析失败: {str(e)}", "error")
             import traceback
             self.log(traceback.format_exc(), "error")
+            self._show_toast("AI 分析失败", "error")
             self.root.after(0, lambda: messagebox.showerror("错误", f"AI分析失败: {str(e)}"))
         finally:
-            # 重置AI分析状态
             self._ai_is_running = False
+            self._safe_button_operation("ai_analysis_btn", lambda btn: btn.configure(text="AI 分析"))
             self._reset_button_state("ai_analysis_btn")
     
     def _perform_ai_analysis(self):
@@ -3445,9 +3649,8 @@ class Git2LogsGUI:
                 messagebox.showwarning("提示", "没有可用的数据进行分析")
                 return
 
-            # 设置AI分析运行状态
             self._ai_is_running = True
-            self._safe_button_operation("ai_analysis_btn", lambda btn: btn.configure(state="disabled"))
+            self._safe_button_operation("ai_analysis_btn", lambda btn: btn.configure(state="disabled", text="分析中..."))
             
             ai_config = {
                 'service': self.ai_service.get(),
@@ -3501,15 +3704,17 @@ class Git2LogsGUI:
             self.log(f"AI分析报告已保存: {ai_report_file}", "success")
             self.log("=" * 60, "info")
             self.log("AI分析完成！", "success")
+            self._show_toast("AI 分析完成", "success")
             
         except Exception as e:
             self.log(f"AI分析失败: {str(e)}", "error")
             import traceback
             self.log(traceback.format_exc(), "error")
+            self._show_toast("AI 分析失败", "error")
             self.root.after(0, lambda: messagebox.showerror("错误", f"AI分析失败: {str(e)}"))
         finally:
-            # 重置AI分析状态
             self._ai_is_running = False
+            self._safe_button_operation("ai_analysis_btn", lambda btn: btn.configure(text="AI 分析"))
             self._reset_button_state("ai_analysis_btn")
     
     def test_ai_connection(self):
@@ -3536,7 +3741,7 @@ class Git2LogsGUI:
             # 统一改用 ai_analysis.py 中的服务类进行测试，确保逻辑一致
             from ai_analysis import get_ai_service
             service_class = get_ai_service(service)
-            test_service = service_class(api_key=api_key, model=model, timeout=10)
+            test_service = service_class(api_key=api_key, model=model, timeout=AIConfig.CONNECTION_TEST_TIMEOUT)
             
             # 针对 Gemini 做一个更稳健的连接测试
             if service == "gemini":
@@ -3636,7 +3841,7 @@ def main():
             messagebox.showerror("启动错误", error_msg)
             error_root.destroy()
         except Exception:
-            pass
+            logger.debug("显示启动错误对话框失败")
         if root:
             root.destroy()
         raise

@@ -38,26 +38,29 @@ if not exist "%ICON_FILE%" (
 
 REM 使用 PyInstaller 打包
 echo 开始打包...
-pyinstaller --name="GitLab提交日志生成工具" ^
+pyinstaller --name="MIZUKI-TOOLBOX" ^
     --windowed ^
-    --onefile ^
+    --onedir ^
     --add-data "git2logs.py;." ^
+    --add-data "ai_analysis.py;." ^
+    --add-data "excel_exporter.py;." ^
     --add-data "generate_report_image.py;." ^
-    --hidden-import=tkinter ^
+    --add-data "config.py;." ^
+    --add-data "utils;utils" ^
+    --hidden-import=customtkinter ^
     --hidden-import=gitlab ^
-    --hidden-import=tkinter.ttk ^
-    --hidden-import=tkinter.scrolledtext ^
+    --hidden-import=tkinter ^
     --hidden-import=tkinter.messagebox ^
     --hidden-import=tkinter.filedialog ^
     %ICON_PARAM% ^
-    git2logs_gui.py
+    git2logs_gui_ctk.py
 
 REM 检查是否成功
-if exist "dist\GitLab提交日志生成工具.exe" (
+if exist "dist\MIZUKI-TOOLBOX" (
     echo.
     echo ==========================================
     echo 打包成功！
-    echo 可执行文件位置: dist\GitLab提交日志生成工具.exe
+    echo 输出目录: dist\MIZUKI-TOOLBOX
     echo ==========================================
 ) else (
     echo.

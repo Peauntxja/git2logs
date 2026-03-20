@@ -432,5 +432,5 @@ def load_work_hours_file(path: str) -> dict:
             if isinstance(data, dict) and data:
                 return data
         except Exception:
-            pass
+            logger.debug("JSON解析工时数据失败，尝试MD格式解析")
         return parse_work_hours_md(content)

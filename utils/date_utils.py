@@ -159,3 +159,24 @@ def get_date_range_days(since_date: str, until_date: str) -> int:
     start = parse_simple_date(since_date)
     end = parse_simple_date(until_date)
     return (end - start).days + 1
+
+
+def to_gitlab_datetime(date_str: str, end_of_day: bool = False) -> str:
+    """
+    将 YYYY-MM-DD 日期字符串转换为 GitLab API 所需的 ISO 8601 格式。
+
+    Args:
+        date_str: 日期字符串，格式 YYYY-MM-DD
+        end_of_day: True 则返回当天 23:59:59Z，False 则返回 00:00:00Z
+
+    Returns:
+        str: GitLab API 格式日期字符串
+
+    Examples:
+        >>> to_gitlab_datetime("2025-01-12")
+        '2025-01-12T00:00:00Z'
+        >>> to_gitlab_datetime("2025-01-12", end_of_day=True)
+        '2025-01-12T23:59:59Z'
+    """
+    suffix = 'T23:59:59Z' if end_of_day else 'T00:00:00Z'
+    return f"{date_str}{suffix}"
