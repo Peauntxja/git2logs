@@ -39,7 +39,10 @@ class UIStyles:
         'warning': "#F59E0B",      # 警告黄
         'error': "#EF4444",        # 错误红
         'hover': "#374151",        # 悬停色
-        'active': "#1F2937"        # 激活色
+        'active': "#1F2937",       # 激活色
+        'success_hover': "#059669",
+        'error_hover': "#DC2626",
+        'accent_hover': "#2563EB",
     }
 
     # 间距系统 (基于8px网格)
@@ -108,6 +111,107 @@ def _resolve_monospace_font(root, size=10):
     return ("Courier", size)
 
 
+# 侧栏 PIL 失败时的单字回显（与 _create_sidebar 的 tab 名一致）
+_SIDEBAR_TAB_GLYPHS = {
+    "GitLab配置": "配",
+    "日期和输出": "日",
+    "AI分析": "A",
+    "Excel导出": "表",
+}
+
+
+def _hex_to_rgb(color_hex: str):
+    h = color_hex.lstrip("#")
+    return tuple(int(h[i : i + 2], 16) for i in (0, 2, 4))
+
+
+def _pil_sidebar_icon(kind: str, color_hex: str, size: int = 24):
+    """单色线框风侧栏图标（近似工具类 App 的灰度图标，避免彩色 emoji）。"""
+    import math
+    from PIL import Image, ImageDraw
+
+    rgb = _hex_to_rgb(color_hex)
+    fill = rgb + (255,)
+    im = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    dr = ImageDraw.Draw(im)
+    lw = max(2, round(size / 11))
+    s = float(size)
+    m = round(s * 0.14)
+
+    def rr(xy, radius, **kw):
+        try:
+            dr.rounded_rectangle(xy, radius=radius, **kw)
+        except Exception:
+            dr.rectangle(xy, **kw)
+
+    if kind == "gear":
+        cx, cy = s / 2, s / 2
+        r_outer = s * 0.36
+        r_inner = s * 0.20
+        dr.ellipse(
+            [cx - r_outer, cy - r_outer, cx + r_outer, cy + r_outer],
+            outline=fill,
+            width=lw,
+        )
+        dr.ellipse(
+            [cx - r_inner, cy - r_inner, cx + r_inner, cy + r_inner],
+            outline=fill,
+            width=lw,
+        )
+        n = 8
+        for i in range(n):
+            a = (i * 2 * math.pi / n) - math.pi / 2
+            x0 = cx + (r_outer - lw) * math.cos(a)
+            y0 = cy + (r_outer - lw) * math.sin(a)
+            x1 = cx + (r_outer + s * 0.12) * math.cos(a)
+            y1 = cy + (r_outer + s * 0.12) * math.sin(a)
+            dr.line([(x0, y0), (x1, y1)], fill=fill, width=lw)
+
+    elif kind == "calendar":
+        x0, y0 = m, round(s * 0.22)
+        x1, y1 = size - m, size - m
+        rr([x0, y0, x1, y1], radius=3, outline=fill, width=lw)
+        y_split = y0 + round(s * 0.16)
+        dr.line([(x0, y_split), (x1, y_split)], fill=fill, width=lw)
+        dr.line([(round(s * 0.32), y0), (round(s * 0.32), y0 - round(s * 0.08))], fill=fill, width=lw)
+        dr.line([(round(s * 0.68), y0), (round(s * 0.68), y0 - round(s * 0.08))], fill=fill, width=lw)
+        rr(
+            [round(s * 0.26), round(s * 0.52), round(s * 0.40), round(s * 0.66)],
+            radius=1,
+            outline=fill,
+            width=max(1, lw - 1),
+        )
+        rr(
+            [round(s * 0.45), round(s * 0.52), round(s * 0.59), round(s * 0.66)],
+            radius=1,
+            outline=fill,
+            width=max(1, lw - 1),
+        )
+
+    elif kind == "chip":
+        body = [round(s * 0.28), round(s * 0.28), round(s * 0.72), round(s * 0.72)]
+        rr(body, radius=3, outline=fill, width=lw)
+        pin_h = max(2, round(s * 0.06))
+        for py in (round(s * 0.38), round(s * 0.48), round(s * 0.58)):
+            dr.rectangle([round(s * 0.16), py, round(s * 0.26), py + pin_h], outline=fill, width=1)
+            dr.rectangle([round(s * 0.74), py, round(s * 0.84), py + pin_h], outline=fill, width=1)
+
+    elif kind == "chart":
+        base = size - m
+        dr.line([(m, base), (size - m, base)], fill=fill, width=lw)
+        bars = [
+            [round(s * 0.22), round(s * 0.58), round(s * 0.34), base - lw],
+            [round(s * 0.42), round(s * 0.42), round(s * 0.54), base - lw],
+            [round(s * 0.62), round(s * 0.30), round(s * 0.74), base - lw],
+        ]
+        for bx in bars:
+            rr(bx, radius=2, outline=fill, width=lw)
+    else:
+        dr.ellipse([m, m, size - m, size - m], outline=fill, width=lw)
+
+    return im
+
+
 class Git2LogsGUI:
     def __init__(self, root):
         try:
@@ -126,6 +230,22 @@ class Git2LogsGUI:
             self._validation_labels: dict = {}  # 字段名 -> 校验提示 CTkLabel
             self._log_collapsed = False
             self._current_theme = "dark"
+            # 主题切换时需同步的控件（由各 Tab 构建时登记）
+            self._theme_panels_main: list = []
+            self._theme_entries_typed: list = []  # (widget, 'main'|'card')
+            self._theme_comboboxes: list = []
+            self._theme_outline_buttons: list = []
+            self._theme_labels_primary: list = []
+            self._theme_labels_secondary: list = []
+            self._theme_check_radio: list = []
+            self._theme_radio_buttons: list = []
+            self._responsive_wrap_labels: list = []
+            self._resize_wrap_job = None
+            self._sidebar_icon_by_tab: dict = {}
+            self._sidebar_icon_assets: list = []
+            self._sidebar_icon_pills: list = []
+            self._sidebar_icon_px = 22
+            self._sidebar_icons_text_fallback = False
 
             # 配置 CustomTkinter 主题
             ctk.set_appearance_mode("dark")  # 强制暗黑模式
@@ -164,7 +284,7 @@ class Git2LogsGUI:
             self.tab_frames = {}
             self.current_tab = None
             self.tab_buttons = []   # 兼容旧代码，sidebar 创建后填充
-            self._sidebar_btns = {} # {tab_name: (frame, icon_lbl, text_lbl)}
+            self._sidebar_btns = {}  # {tab_name: (frame, icon_lbl, text_lbl, kind)}
 
             # ── 底部固定操作按钮容器 ───────────────────────
             self.bottom_actions_frame = ctk.CTkFrame(main_container, fg_color=self.styles.colors['bg_main'], corner_radius=0)
@@ -229,6 +349,7 @@ class Git2LogsGUI:
                     # 初始日志
                     self.log("欢迎使用 MIZUKI-GITLAB工具箱！", "info")
                     self.log("请填写参数后点击'▶ 生成日志'按钮。", "info")
+                    self.root.after(120, self._sync_responsive_wraplengths)
                 except Exception as e:
                     import traceback
                     self.log(f"初始化错误: {str(e)}", "error")
@@ -250,6 +371,76 @@ class Git2LogsGUI:
     def _sidebar_selected_bg(self):
         """侧栏当前选中项背景（随深浅主题变化）。"""
         return "#1E3A5F" if getattr(self, "_current_theme", "dark") == "dark" else "#C7D2FE"
+
+    def _apply_sidebar_text_glyphs(self):
+        """无 Pillow 时用单字占位，仍保持灰 / 强调色与选中态一致。"""
+        ct = getattr(self, "current_tab", None)
+        c = self.styles.colors
+        glyph_font = ctk.CTkFont(size=12, weight="bold")
+        for name, tpl in self._sidebar_btns.items():
+            if len(tpl) < 4:
+                continue
+            icon_lbl = tpl[1]
+            g = _SIDEBAR_TAB_GLYPHS.get(name, "·")
+            col = c["accent"] if name == ct else c["text_secondary"]
+            try:
+                icon_lbl.configure(text=g, text_color=col, font=glyph_font, image=None)
+            except TypeError:
+                try:
+                    icon_lbl.configure(text=g, text_color=col, font=glyph_font)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+    def _apply_sidebar_icon_images(self):
+        """按 current_tab 切换侧栏图标（灰 / 强调色）；文字回退模式走字形着色。"""
+        if getattr(self, "_sidebar_icons_text_fallback", False):
+            self._apply_sidebar_text_glyphs()
+            return
+        ct = getattr(self, "current_tab", None)
+        if not getattr(self, "_sidebar_icon_by_tab", None):
+            return
+        for name, tpl in self._sidebar_btns.items():
+            if len(tpl) < 4:
+                continue
+            icon_lbl = tpl[1]
+            pair = self._sidebar_icon_by_tab.get(name)
+            if not pair:
+                continue
+            img_m, img_a = pair
+            try:
+                icon_lbl.configure(image=img_a if name == ct else img_m, text="")
+            except Exception:
+                pass
+
+    def _rebuild_sidebar_icons(self):
+        """按当前主题重绘侧栏矢量图标（PIL → CTkImage）。"""
+        if not getattr(self, "_sidebar_btns", None):
+            return
+        try:
+            px = getattr(self, "_sidebar_icon_px", 22)
+            pil_sz = max(26, px + 4)
+            c = self.styles.colors
+            self._sidebar_icon_by_tab = {}
+            self._sidebar_icon_assets = []
+            for name, tpl in self._sidebar_btns.items():
+                if len(tpl) < 4:
+                    continue
+                _frame, icon_lbl, _text, kind = tpl[:4]
+                pil_m = _pil_sidebar_icon(kind, c["text_secondary"], size=pil_sz)
+                pil_a = _pil_sidebar_icon(kind, c["accent"], size=pil_sz)
+                img_m = ctk.CTkImage(light_image=pil_m, dark_image=pil_m, size=(px, px))
+                img_a = ctk.CTkImage(light_image=pil_a, dark_image=pil_a, size=(px, px))
+                self._sidebar_icon_assets.extend([img_m, img_a])
+                self._sidebar_icon_by_tab[name] = (img_m, img_a)
+            self._sidebar_icons_text_fallback = False
+            self._apply_sidebar_icon_images()
+        except Exception:
+            self._sidebar_icons_text_fallback = True
+            self._sidebar_icon_by_tab = {}
+            self._sidebar_icon_assets = []
+            self._apply_sidebar_text_glyphs()
     
     def _create_header(self, parent):
         """创建顶部 Header 栏（品牌名 + 版本信息）"""
@@ -287,30 +478,40 @@ class Git2LogsGUI:
         self._header_sub_lbl.pack(side="right", pady=16)
 
     def _create_sidebar(self, parent):
-        """创建左侧图标导航栏（微信风格垂直 Tab）"""
+        """创建左侧导航：单色线框图标 + 圆角胶囊底（风格参考工具类 App，非 emoji）。"""
         nav_items = [
-            ("GitLab配置", "🔧", "配置"),
-            ("日期和输出", "📅", "日期"),
-            ("AI分析",    "🤖", "AI"),
-            ("Excel导出", "📊", "Excel"),
+            ("GitLab配置", "gear", "配置"),
+            ("日期和输出", "calendar", "日期"),
+            ("AI分析", "chip", "AI"),
+            ("Excel导出", "chart", "Excel"),
         ]
+
+        self._sidebar_icon_pills.clear()
 
         # 顶部留白
         ctk.CTkLabel(parent, text="", height=12, fg_color="transparent").pack()
 
-        for tab_name, icon, label in nav_items:
-            # 每项外层容器（用于悬停/选中高亮）
+        for tab_name, kind, label in nav_items:
             item_frame = ctk.CTkFrame(parent,
                                       fg_color="transparent",
                                       corner_radius=self.styles.radius['md'])
             item_frame.pack(fill="x", padx=8, pady=3)
 
-            icon_lbl = ctk.CTkLabel(item_frame,
-                                    text=icon,
-                                    font=ctk.CTkFont(size=22),
-                                    text_color=self.styles.colors['text_secondary'],
-                                    fg_color="transparent")
-            icon_lbl.pack(pady=(10, 1))
+            icon_pill = ctk.CTkFrame(
+                item_frame,
+                fg_color=self.styles.colors['bg_card'],
+                corner_radius=10,
+                border_width=1,
+                border_color=self.styles.colors['border'],
+                width=44,
+                height=36,
+            )
+            icon_pill.pack(pady=(8, 2))
+            icon_pill.pack_propagate(False)
+            self._sidebar_icon_pills.append(icon_pill)
+
+            icon_lbl = ctk.CTkLabel(icon_pill, text="", fg_color="transparent")
+            icon_lbl.pack(expand=True)
 
             text_lbl = ctk.CTkLabel(item_frame,
                                     text=label,
@@ -319,8 +520,7 @@ class Git2LogsGUI:
                                     fg_color="transparent")
             text_lbl.pack(pady=(0, 10))
 
-            # 绑定点击、悬停
-            for w in (item_frame, icon_lbl, text_lbl):
+            for w in (item_frame, icon_pill, icon_lbl, text_lbl):
                 w.bind("<Button-1>", lambda e, n=tab_name: self._switch_tab(n))
                 w.bind("<Enter>",    lambda e, f=item_frame, n=tab_name: (
                     f.configure(fg_color=self.styles.colors['hover'])
@@ -332,9 +532,10 @@ class Git2LogsGUI:
                     else f.configure(fg_color="transparent")
                 ))
 
-            self._sidebar_btns[tab_name] = (item_frame, icon_lbl, text_lbl)
-            # 兼容旧 tab_buttons 引用（响应式 _adapt_tab_labels 等）
+            self._sidebar_btns[tab_name] = (item_frame, icon_lbl, text_lbl, kind)
             self.tab_buttons.append((tab_name, item_frame))
+
+        self._rebuild_sidebar_icons()
 
         # 底部分隔线
         ctk.CTkFrame(parent, fg_color=self.styles.colors['border'], height=1, corner_radius=0).pack(
@@ -480,6 +681,15 @@ class Git2LogsGUI:
             self._header_sub_lbl.configure(text_color=c['text_tertiary'])
         if hasattr(self, "_sidebar_frame"):
             self._sidebar_frame.configure(fg_color=sidebar_bg)
+        for pill in getattr(self, "_sidebar_icon_pills", []):
+            try:
+                pill.configure(
+                    fg_color=c['bg_card'],
+                    border_color=c['border'],
+                )
+            except Exception:
+                pass
+        self._rebuild_sidebar_icons()
 
         if hasattr(self, "_log_container"):
             self._log_container.configure(fg_color=c['bg_main'])
@@ -505,6 +715,225 @@ class Git2LogsGUI:
                 hover_color=c['hover'],
                 border_color=c['border'],
             )
+        if hasattr(self, "_run_progress"):
+            try:
+                self._run_progress.configure(progress_color=c['accent'])
+            except Exception:
+                pass
+        self._refresh_content_theme()
+
+    def _track_panel_main(self, w):
+        if w is not None:
+            self._theme_panels_main.append(w)
+
+    def _track_entry(self, w, surface='card'):
+        if w is not None:
+            self._theme_entries_typed.append((w, surface))
+
+    def _track_combo(self, w):
+        if w is not None:
+            self._theme_comboboxes.append(w)
+
+    def _track_outline_button(self, w):
+        if w is not None:
+            self._theme_outline_buttons.append(w)
+
+    def _track_label_primary(self, w):
+        if w is not None:
+            self._theme_labels_primary.append(w)
+
+    def _track_label_secondary(self, w):
+        if w is not None:
+            self._theme_labels_secondary.append(w)
+
+    def _track_check_or_radio(self, w):
+        if w is not None:
+            self._theme_check_radio.append(w)
+
+    def _track_format_radio(self, w):
+        if w is not None:
+            self._theme_radio_buttons.append(w)
+
+    def _track_responsive_wrap(self, w):
+        if w is not None:
+            self._responsive_wrap_labels.append(w)
+
+    def _refresh_project_cb_theme(self):
+        if not hasattr(self, "_project_checkbox_frame"):
+            return
+        c = self.styles.colors
+        for w in self._project_checkbox_frame.winfo_children():
+            if isinstance(w, ctk.CTkCheckBox):
+                try:
+                    w.configure(text_color=c['text_primary'], fg_color=c['accent'])
+                except Exception:
+                    pass
+
+    def _refresh_content_theme(self):
+        """同步各 Tab 内卡片、输入框、次要按钮等与当前主题一致。"""
+        c = self.styles.colors
+        ho = c['hover']
+        for w in self._theme_panels_main:
+            try:
+                w.configure(fg_color=c['bg_main'])
+            except Exception:
+                pass
+        if hasattr(self, "_tab1_hint_frame"):
+            try:
+                self._tab1_hint_frame.configure(fg_color=c['bg_main'], border_color=c['border'])
+            except Exception:
+                pass
+        for w, surf in self._theme_entries_typed:
+            try:
+                fg = c['bg_main'] if surf == 'main' else c['bg_card']
+                w.configure(fg_color=fg, border_color=c['border'], text_color=c['text_primary'])
+            except Exception:
+                pass
+        for w in self._theme_comboboxes:
+            try:
+                w.configure(
+                    fg_color=c['bg_card'],
+                    border_color=c['border'],
+                    text_color=c['text_primary'],
+                    button_color=c['bg_card'],
+                    button_hover_color=ho,
+                    dropdown_fg_color=c['bg_card'],
+                    dropdown_text_color=c['text_primary'],
+                    dropdown_hover_color=ho,
+                )
+            except Exception:
+                pass
+        for w in self._theme_outline_buttons:
+            try:
+                w.configure(
+                    fg_color=c['bg_card'],
+                    text_color=c['text_primary'],
+                    hover_color=ho,
+                    border_color=c['border'],
+                )
+            except Exception:
+                pass
+        for w in self._theme_labels_primary:
+            try:
+                w.configure(text_color=c['text_primary'])
+            except Exception:
+                pass
+        for w in self._theme_labels_secondary:
+            try:
+                w.configure(text_color=c['text_secondary'])
+            except Exception:
+                pass
+        for w in self._theme_check_radio:
+            try:
+                w.configure(text_color=c['text_primary'], fg_color=c['accent'])
+            except Exception:
+                pass
+        for w in self._theme_radio_buttons:
+            try:
+                w.configure(text_color=c['text_primary'], fg_color=c['accent'])
+            except Exception:
+                pass
+        if hasattr(self, "_project_checkbox_frame"):
+            for w in self._project_checkbox_frame.winfo_children():
+                if isinstance(w, ctk.CTkLabel):
+                    try:
+                        w.configure(text_color=c['text_secondary'])
+                    except Exception:
+                        pass
+        self._refresh_project_cb_theme()
+        if hasattr(self, "_format_options_scroll"):
+            try:
+                self._format_options_scroll.configure(
+                    scrollbar_button_color=c['bg_main'],
+                    scrollbar_button_hover_color=c['bg_main'],
+                )
+            except Exception:
+                pass
+        if hasattr(self, "_bottom_separator"):
+            try:
+                self._bottom_separator.configure(fg_color=c['border'])
+            except Exception:
+                pass
+        if hasattr(self, "_button_container_ref"):
+            try:
+                self._button_container_ref.configure(fg_color=c['bg_main'])
+            except Exception:
+                pass
+        if hasattr(self, "clear_btn"):
+            try:
+                self.clear_btn.configure(
+                    fg_color=c['bg_card'],
+                    text_color=c['text_primary'],
+                    hover_color=ho,
+                    border_color=c['border'],
+                )
+            except Exception:
+                pass
+        if hasattr(self, "ai_analysis_btn"):
+            try:
+                self.ai_analysis_btn.configure(
+                    fg_color=c['bg_card'],
+                    text_color=c['text_primary'],
+                    hover_color=ho,
+                    border_color=c['border'],
+                )
+            except Exception:
+                pass
+        if hasattr(self, "generate_btn"):
+            try:
+                if getattr(self, "_is_running", False):
+                    self.generate_btn.configure(
+                        fg_color=c['error'],
+                        hover_color=c['error_hover'],
+                        text_color="white",
+                    )
+                else:
+                    self.generate_btn.configure(
+                        fg_color=c['success'],
+                        hover_color=c['success_hover'],
+                        text_color="white",
+                    )
+            except Exception:
+                pass
+        if hasattr(self, "_excel_export_btn"):
+            try:
+                self._excel_export_btn.configure(
+                    fg_color=c['accent'],
+                    hover_color=c['accent_hover'],
+                    text_color="#FFFFFF",
+                )
+            except Exception:
+                pass
+        self._sync_responsive_wraplengths()
+
+    def _sync_responsive_wraplengths(self):
+        """按窗口宽度更新长文案标签的 wraplength。"""
+        try:
+            ww = self.root.winfo_width()
+            inner = max(220, ww - 140)
+            for lbl in self._responsive_wrap_labels:
+                try:
+                    lbl.configure(wraplength=inner)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def _on_keyboard_generate(self, event):
+        """⌘+Return 触发生成（焦点在日志文本框内时不触发）。"""
+        try:
+            from tkinter import Text
+            w = self.root.focus_get()
+            if w is None:
+                self.generate_logs()
+                return
+            if isinstance(w, Text):
+                return
+        except Exception:
+            pass
+        if getattr(self, "_is_running", False):
+            return
+        self.generate_logs()
     
     def _create_tab1_gitlab_config(self):
         """创建标签页1: GitLab配置"""
@@ -525,6 +954,7 @@ class Git2LogsGUI:
                                 text_color=self.text_primary,
                                 anchor="w")
         url_label.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        self._track_label_primary(url_label)
         row += 1
         
         self.gitlab_url = ctk.StringVar()
@@ -539,6 +969,7 @@ class Git2LogsGUI:
                                   fg_color=self.bg_main,
                                   text_color=self.text_primary)
         gitlab_entry.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        self._track_entry(gitlab_entry, 'main')
         row += 1
         self._validation_labels['gitlab_url'] = ctk.CTkLabel(
             content, text="", font=self.styles.fonts['caption'](),
@@ -552,6 +983,7 @@ class Git2LogsGUI:
                                  text_color=self.text_primary,
                                  anchor="w")
         repo_label.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        self._track_label_primary(repo_label)
         row += 1
         
         self.repo = ctk.StringVar()
@@ -565,6 +997,7 @@ class Git2LogsGUI:
                                  fg_color=self.bg_main,
                                  text_color=self.text_primary)
         repo_entry.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        self._track_entry(repo_entry, 'main')
         row += 1
         self._validation_labels['repo'] = ctk.CTkLabel(
             content, text="", font=self.styles.fonts['caption'](),
@@ -582,6 +1015,7 @@ class Git2LogsGUI:
                                     fg_color=self.accent_color,
                                     corner_radius=4)
         scan_check.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 24))
+        self._track_check_or_radio(scan_check)
         row += 1
         
         # 分支
@@ -590,6 +1024,7 @@ class Git2LogsGUI:
                                   text_color=self.text_primary,
                                   anchor="w")
         branch_label.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        self._track_label_primary(branch_label)
         row += 1
         
         self.branch = ctk.StringVar()
@@ -603,6 +1038,7 @@ class Git2LogsGUI:
                                    fg_color=self.bg_main,
                                    text_color=self.text_primary)
         branch_entry.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 24))
+        self._track_entry(branch_entry, 'main')
         row += 1
         
         # 提交者
@@ -611,6 +1047,7 @@ class Git2LogsGUI:
                                    text_color=self.text_primary,
                                    anchor="w")
         author_label.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        self._track_label_primary(author_label)
         row += 1
         
         self.author = ctk.StringVar(value="MIZUKI")
@@ -624,6 +1061,7 @@ class Git2LogsGUI:
                                    fg_color=self.bg_main,
                                    text_color=self.text_primary)
         author_entry.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        self._track_entry(author_entry, 'main')
         row += 1
         self._validation_labels['author'] = ctk.CTkLabel(
             content, text="", font=self.styles.fonts['caption'](),
@@ -637,6 +1075,7 @@ class Git2LogsGUI:
                                  text_color=self.text_primary,
                                  anchor="w")
         token_label.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        self._track_label_primary(token_label)
         row += 1
         
         self.token = ctk.StringVar()
@@ -655,6 +1094,7 @@ class Git2LogsGUI:
                                   fg_color=self.bg_main,
                                   text_color=self.text_primary)
         token_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        self._track_entry(token_entry, 'main')
         
         show_btn = ctk.CTkButton(token_frame,
                                 text="显示",
@@ -664,11 +1104,12 @@ class Git2LogsGUI:
                                 corner_radius=8,
                                 fg_color=self.bg_card,
                                 text_color=self.text_primary,
-                                hover_color="#3F3F46",
+                                hover_color=self.styles.colors['hover'],
                                 border_width=1,
                                 border_color=self.border_color,
                                 command=lambda: self.toggle_token_visibility(token_entry))
         show_btn.grid(row=0, column=1)
+        self._track_outline_button(show_btn)
         row += 1
         self._validation_labels['token'] = ctk.CTkLabel(
             content, text="", font=self.styles.fonts['caption'](),
@@ -683,6 +1124,7 @@ class Git2LogsGUI:
                                  border_width=1,
                                  border_color=self.border_color)
         hint_frame.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        self._tab1_hint_frame = hint_frame
         
         hint_title = ctk.CTkLabel(hint_frame,
                                 text="使用提示",
@@ -690,6 +1132,7 @@ class Git2LogsGUI:
                                 text_color=self.text_primary,
                                 anchor="w")
         hint_title.pack(anchor="w", padx=16, pady=(16, 8))
+        self._track_label_primary(hint_title)
         
         hint_text = "• GitLab URL 是您的GitLab实例地址\n• 仓库地址留空时，勾选'自动扫描所有项目'可扫描所有项目\n• 访问令牌用于身份验证，可在GitLab设置中生成"
         hint_label = ctk.CTkLabel(hint_frame,
@@ -699,6 +1142,7 @@ class Git2LogsGUI:
                                  justify="left",
                                  anchor="w")
         hint_label.pack(anchor="w", padx=16, pady=(0, 16))
+        self._track_label_secondary(hint_label)
         
         # 添加底部占位符
         ctk.CTkLabel(content, text="", height=50).grid(row=row + 1, column=0)
@@ -917,6 +1361,7 @@ class Git2LogsGUI:
         date_card = ctk.CTkFrame(content, fg_color=self.bg_main, corner_radius=10)
         date_card.grid(row=row, column=0, sticky="ew", pady=(0, 20))
         date_card.columnconfigure(1, weight=1)
+        self._track_panel_main(date_card)
         content.columnconfigure(0, weight=1)  # 确保内容容器自适应
         
         date_title = ctk.CTkLabel(date_card,
@@ -925,6 +1370,7 @@ class Git2LogsGUI:
                                 text_color=self.text_primary,
                                 anchor="w")
         date_title.grid(row=0, column=0, columnspan=2, sticky="w", padx=20, pady=(20, 16))
+        self._track_label_primary(date_title)
         
         date_row = 1
         self.use_today = ctk.BooleanVar(value=True)
@@ -937,6 +1383,7 @@ class Git2LogsGUI:
                                     corner_radius=4,
                                     command=self.toggle_date_inputs)
         today_check.grid(row=date_row, column=0, sticky="w", padx=20, pady=8)
+        self._track_check_or_radio(today_check)
         
         date_input_frame = ctk.CTkFrame(date_card, fg_color="transparent")
         date_input_frame.grid(row=date_row, column=1, sticky="ew", padx=(0, 20))
@@ -950,6 +1397,7 @@ class Git2LogsGUI:
                                  text_color=self.text_secondary,
                                  anchor="w")
         since_label.grid(row=0, column=0, padx=(0, 8), sticky="w")
+        self._track_label_secondary(since_label)
         self.since_date = ctk.StringVar()
         self.since_entry = ctk.CTkEntry(date_input_frame,
                                       textvariable=self.since_date,
@@ -961,6 +1409,7 @@ class Git2LogsGUI:
                                       fg_color=self.bg_card,
                                       text_color=self.text_primary)
         self.since_entry.grid(row=1, column=0, padx=(0, 10), pady=(6, 0), sticky="ew")
+        self._track_entry(self.since_entry, 'card')
         
         until_label = ctk.CTkLabel(date_input_frame,
                                  text="结束日期",
@@ -968,6 +1417,7 @@ class Git2LogsGUI:
                                  text_color=self.text_secondary,
                                  anchor="w")
         until_label.grid(row=0, column=1, padx=(0, 8), sticky="w")
+        self._track_label_secondary(until_label)
         self.until_date = ctk.StringVar()
         self.until_entry = ctk.CTkEntry(date_input_frame,
                                       textvariable=self.until_date,
@@ -979,6 +1429,7 @@ class Git2LogsGUI:
                                       fg_color=self.bg_card,
                                       text_color=self.text_primary)
         self.until_entry.grid(row=1, column=1, pady=(6, 0), sticky="ew")
+        self._track_entry(self.until_entry, 'card')
         
         date_hint = ctk.CTkLabel(date_card,
                                text="提示: 日期格式为 YYYY-MM-DD，例如: 2025-12-12",
@@ -986,6 +1437,7 @@ class Git2LogsGUI:
                                text_color=self.text_secondary,
                                anchor="w")
         date_hint.grid(row=2, column=0, columnspan=2, sticky="w", padx=20, pady=(16, 20))
+        self._track_label_secondary(date_hint)
         
         self.toggle_date_inputs()
         row += 1
@@ -994,6 +1446,8 @@ class Git2LogsGUI:
         format_card = ctk.CTkFrame(content, fg_color=self.bg_main, corner_radius=10)
         format_card.grid(row=row, column=0, sticky="ew", pady=(0, 20))
         format_card.columnconfigure(0, weight=1)
+        format_card.rowconfigure(1, weight=0)
+        self._track_panel_main(format_card)
         
         format_title = ctk.CTkLabel(format_card,
                                   text="输出格式",
@@ -1001,6 +1455,7 @@ class Git2LogsGUI:
                                   text_color=self.text_primary,
                                   anchor="w")
         format_title.grid(row=0, column=0, sticky="w", padx=20, pady=(20, 16))
+        self._track_label_primary(format_title)
         
         self.output_format = ctk.StringVar(value="daily_report")
         format_options = [
@@ -1013,8 +1468,24 @@ class Git2LogsGUI:
             ("批量生成所有格式", "all")
         ]
         
-        for i, (text, value) in enumerate(format_options):
-            rb = ctk.CTkRadioButton(format_card,
+        fmt_scroll = ctk.CTkScrollableFrame(
+            format_card,
+            fg_color="transparent",
+            height=220,
+            corner_radius=0,
+        )
+        fmt_scroll.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 16))
+        self._format_options_scroll = fmt_scroll
+        try:
+            fmt_scroll.configure(
+                scrollbar_button_color=self.styles.colors['bg_main'],
+                scrollbar_button_hover_color=self.styles.colors['bg_main'],
+            )
+        except Exception:
+            pass
+        
+        for text, value in format_options:
+            rb = ctk.CTkRadioButton(fmt_scroll,
                                   text=text,
                                   variable=self.output_format,
                                   value=value,
@@ -1022,7 +1493,8 @@ class Git2LogsGUI:
                                   text_color=self.text_primary,
                                   fg_color=self.accent_color,
                                   corner_radius=4)
-            rb.grid(row=i+1, column=0, sticky="w", padx=20, pady=8)
+            rb.pack(anchor="w", padx=4, pady=6)
+            self._track_format_radio(rb)
         
         row += 1
         
@@ -1030,6 +1502,7 @@ class Git2LogsGUI:
         output_card = ctk.CTkFrame(content, fg_color=self.bg_main, corner_radius=10)
         output_card.grid(row=row, column=0, sticky="ew", pady=(0, 0))
         output_card.columnconfigure(0, weight=1)
+        self._track_panel_main(output_card)
         
         output_title = ctk.CTkLabel(output_card,
                                   text="输出设置",
@@ -1037,6 +1510,7 @@ class Git2LogsGUI:
                                   text_color=self.text_primary,
                                   anchor="w")
         output_title.grid(row=0, column=0, sticky="w", padx=20, pady=(20, 16))
+        self._track_label_primary(output_title)
         
         output_label_text = "输出目录" if self.output_format.get() == "all" else "输出文件"
         self.output_label = ctk.CTkLabel(output_card,
@@ -1045,6 +1519,7 @@ class Git2LogsGUI:
                                       text_color=self.text_primary,
                                       anchor="w")
         self.output_label.grid(row=1, column=0, sticky="w", padx=20, pady=(0, 8))
+        self._track_label_primary(self.output_label)
         
         self.output_file = ctk.StringVar()
         output_frame = ctk.CTkFrame(output_card, fg_color="transparent")
@@ -1061,6 +1536,7 @@ class Git2LogsGUI:
                                   fg_color=self.bg_card,
                                   text_color=self.text_primary)
         output_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        self._track_entry(output_entry, 'card')
         
         browse_btn = ctk.CTkButton(output_frame,
                                  text="浏览",
@@ -1070,11 +1546,12 @@ class Git2LogsGUI:
                                  corner_radius=8,
                                  fg_color=self.bg_card,
                                  text_color=self.text_primary,
-                                 hover_color="#3F3F46",
+                                 hover_color=self.styles.colors['hover'],
                                  border_width=1,
                                  border_color=self.border_color,
                                  command=self.browse_output_file)
         browse_btn.grid(row=0, column=1)
+        self._track_outline_button(browse_btn)
         
         self.output_hint = ctk.CTkLabel(output_card,
                                        text="提示: 批量生成时请选择目录",
@@ -1082,6 +1559,7 @@ class Git2LogsGUI:
                                        text_color=self.text_secondary,
                                        anchor="w")
         self.output_hint.grid(row=3, column=0, sticky="w", padx=20, pady=(0, 20))
+        self._track_label_secondary(self.output_hint)
         
         # 绑定输出格式变化事件
         def setup_output_format_trace():
@@ -1122,12 +1600,14 @@ class Git2LogsGUI:
                                          corner_radius=4,
                                          command=self.toggle_ai_config)
         ai_enable_check.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 24))
+        self._track_check_or_radio(ai_enable_check)
         row += 1
         
         # AI配置区域（默认隐藏）
         self.ai_config_frame = ctk.CTkFrame(content, fg_color=self.bg_main, corner_radius=10)
         self.ai_config_frame.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 0))
         self.ai_config_frame.columnconfigure(1, weight=1)
+        self._track_panel_main(self.ai_config_frame)
         
         ai_title = ctk.CTkLabel(self.ai_config_frame,
                               text="AI配置",
@@ -1135,6 +1615,7 @@ class Git2LogsGUI:
                               text_color=self.text_primary,
                               anchor="w")
         ai_title.grid(row=0, column=0, columnspan=2, sticky="w", padx=20, pady=(20, 20))
+        self._track_label_primary(ai_title)
         
         config_row = 1
         
@@ -1145,6 +1626,7 @@ class Git2LogsGUI:
                                     text_color=self.text_primary,
                                     anchor="w")
         service_label.grid(row=config_row, column=0, sticky="w", padx=20, pady=(0, 8))
+        self._track_label_primary(service_label)
         
         self.ai_service = ctk.StringVar(value="openai")
         ai_service_combo = ctk.CTkComboBox(self.ai_config_frame,
@@ -1158,12 +1640,13 @@ class Git2LogsGUI:
                                           fg_color=self.bg_card,
                                           text_color=self.text_primary,
                                           button_color=self.bg_card,
-                                          button_hover_color="#3F3F46",
+                                          button_hover_color=self.styles.colors['hover'],
                                           dropdown_fg_color=self.bg_card,
                                           dropdown_text_color=self.text_primary,
-                                          dropdown_hover_color="#3F3F46",
+                                          dropdown_hover_color=self.styles.colors['hover'],
                                           command=self._update_ai_models)
         ai_service_combo.grid(row=config_row, column=1, sticky="ew", padx=(0, 20), pady=(0, 24))
+        self._track_combo(ai_service_combo)
         config_row += 1
         
         # 模型选择
@@ -1173,6 +1656,7 @@ class Git2LogsGUI:
                                  text_color=self.text_primary,
                                  anchor="w")
         model_label.grid(row=config_row, column=0, sticky="w", padx=20, pady=(0, 8))
+        self._track_label_primary(model_label)
         
         self.ai_model = ctk.StringVar(value="gpt-4o-mini")
         self.ai_model_combo = ctk.CTkComboBox(self.ai_config_frame,
@@ -1186,11 +1670,12 @@ class Git2LogsGUI:
                                              fg_color=self.bg_card,
                                              text_color=self.text_primary,
                                              button_color=self.bg_card,
-                                             button_hover_color="#3F3F46",
+                                             button_hover_color=self.styles.colors['hover'],
                                              dropdown_fg_color=self.bg_card,
                                              dropdown_text_color=self.text_primary,
-                                             dropdown_hover_color="#3F3F46")
+                                             dropdown_hover_color=self.styles.colors['hover'])
         self.ai_model_combo.grid(row=config_row, column=1, sticky="ew", padx=(0, 20), pady=(0, 24))
+        self._track_combo(self.ai_model_combo)
         config_row += 1
         
         # API Key
@@ -1200,6 +1685,7 @@ class Git2LogsGUI:
                                text_color=self.text_primary,
                                anchor="w")
         key_label.grid(row=config_row, column=0, sticky="w", padx=20, pady=(0, 8))
+        self._track_label_primary(key_label)
         
         self.ai_api_key = ctk.StringVar()
         key_frame = ctk.CTkFrame(self.ai_config_frame, fg_color="transparent")
@@ -1217,6 +1703,7 @@ class Git2LogsGUI:
                                    fg_color=self.bg_card,
                                    text_color=self.text_primary)
         ai_key_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        self._track_entry(ai_key_entry, 'card')
         
         key_show_btn = ctk.CTkButton(key_frame,
                                     text="显示",
@@ -1226,11 +1713,12 @@ class Git2LogsGUI:
                                     corner_radius=8,
                                     fg_color=self.bg_card,
                                     text_color=self.text_primary,
-                                    hover_color="#3F3F46",
+                                    hover_color=self.styles.colors['hover'],
                                     border_width=1,
                                     border_color=self.border_color,
                                     command=lambda: self.toggle_key_visibility(ai_key_entry))
         key_show_btn.grid(row=0, column=1)
+        self._track_outline_button(key_show_btn)
         config_row += 1
         
         # 测试连接按钮
@@ -1245,11 +1733,12 @@ class Git2LogsGUI:
                                corner_radius=8,
                                fg_color=self.bg_card,
                                text_color=self.text_primary,
-                               hover_color="#3F3F46",
+                               hover_color=self.styles.colors['hover'],
                                border_width=1,
                                border_color=self.border_color,
                                command=self.test_ai_connection)
         test_btn.pack(side="left", padx=(0, 12))
+        self._track_outline_button(test_btn)
         
         self.test_status_label = ctk.CTkLabel(test_btn_frame,
                                             text="",
@@ -1282,12 +1771,15 @@ class Git2LogsGUI:
         status_card = ctk.CTkFrame(content, fg_color=self.bg_main, corner_radius=10)
         status_card.grid(row=row, column=0, sticky="ew", pady=(0, 20))
         status_card.columnconfigure(0, weight=1)
+        self._track_panel_main(status_card)
 
-        ctk.CTkLabel(status_card,
+        excel_status_hdr = ctk.CTkLabel(status_card,
                      text="工时数据来源",
                      font=ctk.CTkFont(size=15, weight="bold"),
                      text_color=self.text_primary,
-                     anchor="w").grid(row=0, column=0, columnspan=2, sticky="w", padx=20, pady=(20, 8))
+                     anchor="w")
+        excel_status_hdr.grid(row=0, column=0, columnspan=2, sticky="w", padx=20, pady=(20, 8))
+        self._track_label_primary(excel_status_hdr)
 
         self._excel_status_label = ctk.CTkLabel(
             status_card,
@@ -1298,8 +1790,9 @@ class Git2LogsGUI:
             wraplength=400,
         )
         self._excel_status_label.grid(row=1, column=0, sticky="w", padx=20, pady=(0, 16))
+        self._track_responsive_wrap(self._excel_status_label)
 
-        ctk.CTkButton(status_card,
+        load_wh_btn = ctk.CTkButton(status_card,
                       text="从文件加载",
                       width=120,
                       height=36,
@@ -1307,11 +1800,13 @@ class Git2LogsGUI:
                       corner_radius=8,
                       fg_color=self.bg_card,
                       text_color=self.text_primary,
-                      hover_color="#3F3F46",
+                      hover_color=self.styles.colors['hover'],
                       border_width=1,
                       border_color=self.border_color,
                       command=self._load_work_hours_from_file,
-                      ).grid(row=1, column=1, padx=(0, 20), pady=(0, 16), sticky="e")
+                      )
+        load_wh_btn.grid(row=1, column=1, padx=(0, 20), pady=(0, 16), sticky="e")
+        self._track_outline_button(load_wh_btn)
 
         row += 1
 
@@ -1319,19 +1814,22 @@ class Git2LogsGUI:
         tmpl_card = ctk.CTkFrame(content, fg_color=self.bg_main, corner_radius=10)
         tmpl_card.grid(row=row, column=0, sticky="ew", pady=(0, 20))
         tmpl_card.columnconfigure(0, weight=1)
+        self._track_panel_main(tmpl_card)
 
-        ctk.CTkLabel(tmpl_card,
+        tmpl_hdr = ctk.CTkLabel(tmpl_card,
                      text="Excel 模板文件",
                      font=ctk.CTkFont(size=15, weight="bold"),
                      text_color=self.text_primary,
-                     anchor="w").grid(row=0, column=0, sticky="w", padx=20, pady=(20, 8))
+                     anchor="w")
+        tmpl_hdr.grid(row=0, column=0, sticky="w", padx=20, pady=(20, 8))
+        self._track_label_primary(tmpl_hdr)
 
         tmpl_row_frame = ctk.CTkFrame(tmpl_card, fg_color="transparent")
         tmpl_row_frame.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 8))
         tmpl_row_frame.columnconfigure(0, weight=1)
 
         self._excel_template_var = ctk.StringVar()
-        ctk.CTkEntry(tmpl_row_frame,
+        self._excel_template_entry = ctk.CTkEntry(tmpl_row_frame,
                      textvariable=self._excel_template_var,
                      font=ctk.CTkFont(size=13),
                      height=40,
@@ -1340,9 +1838,11 @@ class Git2LogsGUI:
                      border_color=self.border_color,
                      fg_color=self.bg_card,
                      text_color=self.text_primary,
-                     placeholder_text="选择 .xlsx 模板文件…").grid(row=0, column=0, sticky="ew", padx=(0, 8))
+                     placeholder_text="选择 .xlsx 模板文件…")
+        self._excel_template_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        self._track_entry(self._excel_template_entry, 'card')
 
-        ctk.CTkButton(tmpl_row_frame,
+        tmpl_browse_btn = ctk.CTkButton(tmpl_row_frame,
                       text="浏览",
                       width=100,
                       height=40,
@@ -1350,16 +1850,20 @@ class Git2LogsGUI:
                       corner_radius=8,
                       fg_color=self.bg_card,
                       text_color=self.text_primary,
-                      hover_color="#3F3F46",
+                      hover_color=self.styles.colors['hover'],
                       border_width=1,
                       border_color=self.border_color,
-                      command=self._browse_excel_template).grid(row=0, column=1)
+                      command=self._browse_excel_template)
+        tmpl_browse_btn.grid(row=0, column=1)
+        self._track_outline_button(tmpl_browse_btn)
 
-        ctk.CTkLabel(tmpl_card,
+        tmpl_hint_lbl = ctk.CTkLabel(tmpl_card,
                      text="提示: 模板须含表头行（含「任务名称」「预计工时」等列）及一行示例数据",
                      font=ctk.CTkFont(size=11),
                      text_color=self.text_secondary,
-                     anchor="w").grid(row=2, column=0, sticky="w", padx=20, pady=(0, 20))
+                     anchor="w")
+        tmpl_hint_lbl.grid(row=2, column=0, sticky="w", padx=20, pady=(0, 20))
+        self._track_label_secondary(tmpl_hint_lbl)
 
         row += 1
 
@@ -1367,22 +1871,25 @@ class Git2LogsGUI:
         proj_card = ctk.CTkFrame(content, fg_color=self.bg_main, corner_radius=10)
         proj_card.grid(row=row, column=0, sticky="ew", pady=(0, 20))
         proj_card.columnconfigure(0, weight=1)
+        self._track_panel_main(proj_card)
 
         # 标题行 + 全选/全不选按钮
         proj_title_frame = ctk.CTkFrame(proj_card, fg_color="transparent")
         proj_title_frame.grid(row=0, column=0, sticky="ew", padx=20, pady=(20, 8))
         proj_title_frame.columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(proj_title_frame,
+        proj_hdr = ctk.CTkLabel(proj_title_frame,
                      text="选择要导出的项目",
                      font=ctk.CTkFont(size=15, weight="bold"),
                      text_color=self.text_primary,
-                     anchor="w").grid(row=0, column=0, sticky="w")
+                     anchor="w")
+        proj_hdr.grid(row=0, column=0, sticky="w")
+        self._track_label_primary(proj_hdr)
 
         btn_frame = ctk.CTkFrame(proj_title_frame, fg_color="transparent")
         btn_frame.grid(row=0, column=1, sticky="e")
 
-        ctk.CTkButton(btn_frame,
+        sel_all_btn = ctk.CTkButton(btn_frame,
                       text="全选",
                       width=60,
                       height=28,
@@ -1390,13 +1897,15 @@ class Git2LogsGUI:
                       corner_radius=6,
                       fg_color=self.bg_card,
                       text_color=self.text_primary,
-                      hover_color="#3F3F46",
+                      hover_color=self.styles.colors['hover'],
                       border_width=1,
                       border_color=self.border_color,
                       command=lambda: self._select_all_projects(True),
-                      ).pack(side="left", padx=(0, 6))
+                      )
+        sel_all_btn.pack(side="left", padx=(0, 6))
+        self._track_outline_button(sel_all_btn)
 
-        ctk.CTkButton(btn_frame,
+        sel_none_btn = ctk.CTkButton(btn_frame,
                       text="全不选",
                       width=60,
                       height=28,
@@ -1404,11 +1913,13 @@ class Git2LogsGUI:
                       corner_radius=6,
                       fg_color=self.bg_card,
                       text_color=self.text_primary,
-                      hover_color="#3F3F46",
+                      hover_color=self.styles.colors['hover'],
                       border_width=1,
                       border_color=self.border_color,
                       command=lambda: self._select_all_projects(False),
-                      ).pack(side="left")
+                      )
+        sel_none_btn.pack(side="left")
+        self._track_outline_button(sel_none_btn)
 
         # 复选框动态容器
         self._project_checkbox_frame = ctk.CTkFrame(proj_card, fg_color="transparent")
@@ -1428,19 +1939,22 @@ class Git2LogsGUI:
         out_card = ctk.CTkFrame(content, fg_color=self.bg_main, corner_radius=10)
         out_card.grid(row=row, column=0, sticky="ew", pady=(0, 20))
         out_card.columnconfigure(0, weight=1)
+        self._track_panel_main(out_card)
 
-        ctk.CTkLabel(out_card,
+        out_hdr = ctk.CTkLabel(out_card,
                      text="输出 Excel 文件",
                      font=ctk.CTkFont(size=15, weight="bold"),
                      text_color=self.text_primary,
-                     anchor="w").grid(row=0, column=0, sticky="w", padx=20, pady=(20, 8))
+                     anchor="w")
+        out_hdr.grid(row=0, column=0, sticky="w", padx=20, pady=(20, 8))
+        self._track_label_primary(out_hdr)
 
         out_row_frame = ctk.CTkFrame(out_card, fg_color="transparent")
         out_row_frame.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 20))
         out_row_frame.columnconfigure(0, weight=1)
 
         self._excel_output_var = ctk.StringVar()
-        ctk.CTkEntry(out_row_frame,
+        self._excel_output_entry = ctk.CTkEntry(out_row_frame,
                      textvariable=self._excel_output_var,
                      font=ctk.CTkFont(size=13),
                      height=40,
@@ -1449,9 +1963,11 @@ class Git2LogsGUI:
                      border_color=self.border_color,
                      fg_color=self.bg_card,
                      text_color=self.text_primary,
-                     placeholder_text="输出文件路径（.xlsx）…").grid(row=0, column=0, sticky="ew", padx=(0, 8))
+                     placeholder_text="输出文件路径（.xlsx）…")
+        self._excel_output_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        self._track_entry(self._excel_output_entry, 'card')
 
-        ctk.CTkButton(out_row_frame,
+        out_browse_btn = ctk.CTkButton(out_row_frame,
                       text="浏览",
                       width=100,
                       height=40,
@@ -1459,15 +1975,17 @@ class Git2LogsGUI:
                       corner_radius=8,
                       fg_color=self.bg_card,
                       text_color=self.text_primary,
-                      hover_color="#3F3F46",
+                      hover_color=self.styles.colors['hover'],
                       border_width=1,
                       border_color=self.border_color,
-                      command=self._browse_excel_output).grid(row=0, column=1)
+                      command=self._browse_excel_output)
+        out_browse_btn.grid(row=0, column=1)
+        self._track_outline_button(out_browse_btn)
 
         row += 1
 
         # ── 工时规则说明 ─────────────────────────────────
-        rule_label = ctk.CTkLabel(
+        self._excel_rule_label = ctk.CTkLabel(
             content,
             text="工时规则：单条任务 ≥1h（不足自动补齐），单条任务 ≤8h（超额截断）；同一天工时 <1h 的多条任务自动合并",
             font=ctk.CTkFont(size=11),
@@ -1475,7 +1993,9 @@ class Git2LogsGUI:
             anchor="w",
             wraplength=500,
         )
-        rule_label.grid(row=row, column=0, sticky="w", pady=(0, 16))
+        self._excel_rule_label.grid(row=row, column=0, sticky="w", pady=(0, 16))
+        self._track_label_secondary(self._excel_rule_label)
+        self._track_responsive_wrap(self._excel_rule_label)
 
         row += 1
 
@@ -1487,7 +2007,7 @@ class Git2LogsGUI:
             height=48,
             corner_radius=10,
             fg_color=self.accent_color,
-            hover_color="#2563EB",
+            hover_color=self.styles.colors['accent_hover'],
             text_color="#FFFFFF",
             command=self._export_to_excel,
         )
@@ -1687,11 +2207,13 @@ class Git2LogsGUI:
         # 顶部分隔线
         separator = ctk.CTkFrame(self.bottom_actions_frame, fg_color=self.styles.colors['border'], height=1, corner_radius=0)
         separator.pack(fill="x", padx=0, pady=0)
+        self._bottom_separator = separator
 
         button_container = ctk.CTkFrame(self.bottom_actions_frame,
                                        fg_color=self.bg_main,
                                        corner_radius=0)
         button_container.pack(fill="x", padx=self.styles.spacing['md'], pady=(self.styles.spacing['sm'], self.styles.spacing['md']))
+        self._button_container_ref = button_container
 
         # 状态栏（左侧）+ 按钮组（右侧）
         status_row = ctk.CTkFrame(button_container, fg_color="transparent")
@@ -1703,6 +2225,14 @@ class Git2LogsGUI:
                                             text_color=self.styles.colors['success'],
                                             anchor="w")
         self.status_indicator.pack(side="left")
+
+        self._run_progress = ctk.CTkProgressBar(
+            status_row,
+            mode="indeterminate",
+            width=140,
+            height=6,
+            progress_color=self.styles.colors['accent'],
+        )
 
         # 主题切换按钮（右侧）
         theme_btn = ctk.CTkButton(status_row,
@@ -1735,12 +2265,12 @@ class Git2LogsGUI:
                                         corner_radius=self.styles.radius['md'],
                                         fg_color=self.styles.colors['success'],
                                         text_color="white",
-                                        hover_color="#059669",
+                                        hover_color=self.styles.colors['success_hover'],
                                         command=self.generate_logs)
         self.generate_btn.grid(row=0, column=0, padx=(0, self.styles.spacing['sm']), sticky="ew")
 
         # 清空按钮
-        clear_btn = ctk.CTkButton(button_frame,
+        self.clear_btn = ctk.CTkButton(button_frame,
                                 text="清空",
                                 height=44,
                                 font=self.styles.fonts['body'](),
@@ -1751,7 +2281,7 @@ class Git2LogsGUI:
                                 border_width=1,
                                 border_color=self.border_color,
                                 command=self.clear_logs)
-        clear_btn.grid(row=0, column=1, padx=(0, self.styles.spacing['sm']), sticky="ew")
+        self.clear_btn.grid(row=0, column=1, padx=(0, self.styles.spacing['sm']), sticky="ew")
 
         # AI分析按钮
         self.ai_analysis_btn = ctk.CTkButton(button_frame,
@@ -1771,6 +2301,7 @@ class Git2LogsGUI:
         # 绑定窗口大小变化响应式回调
         self.root.bind('<Configure>', self._on_window_resize)
         self._last_resize_width = self.root.winfo_width()
+        self.root.bind_all('<Command-Return>', self._on_keyboard_generate)
     
     def _toggle_theme(self):
         """切换深浅主题"""
@@ -1793,6 +2324,9 @@ class Git2LogsGUI:
             'text_tertiary': "#71717A",
             'border': "#3F3F46",
             'hover': "#374151",
+            'success_hover': "#059669",
+            'error_hover': "#DC2626",
+            'accent_hover': "#2563EB",
         })
         # 同步旧属性别名
         self._sync_color_aliases()
@@ -1821,6 +2355,9 @@ class Git2LogsGUI:
             'text_tertiary': "#71717A",
             'border': "#D4D4D8",
             'hover': "#E4E4E7",
+            'success_hover': "#047857",
+            'error_hover': "#B91C1C",
+            'accent_hover': "#1D4ED8",
         })
         # 同步旧属性别名
         self._sync_color_aliases()
@@ -1883,8 +2420,18 @@ class Git2LogsGUI:
         if abs(current_width - self._last_resize_width) < 20:
             return
         self._last_resize_width = current_width
-        # 根据宽度调整标签页按钮文字
-        self.root.after(100, lambda: self._adapt_tab_labels(current_width))
+        self.root.after(100, lambda w=current_width: self._adapt_tab_labels(w))
+        if self._resize_wrap_job is not None:
+            try:
+                self.root.after_cancel(self._resize_wrap_job)
+            except Exception:
+                pass
+        self._resize_wrap_job = self.root.after(150, self._deferred_resize_layout)
+
+    def _deferred_resize_layout(self):
+        """防抖：窗口缩放后的文案换行宽度"""
+        self._resize_wrap_job = None
+        self._sync_responsive_wraplengths()
 
     def _adapt_tab_labels(self, _width):
         """侧边栏模式下标签已固定为短文字，无需响应式调整"""
@@ -1892,16 +2439,29 @@ class Git2LogsGUI:
 
     def _set_running_state(self, is_running: bool):
         """切换运行状态，同步更新按钮和状态指示"""
+        c = self.styles.colors
         if is_running:
             self.generate_btn.configure(text="⏹ 停止", state="normal",
-                                       fg_color=self.styles.colors['error'],
-                                       hover_color="#DC2626")
+                                       fg_color=c['error'],
+                                       hover_color=c['error_hover'])
             self._update_status("正在生成日志…", "running")
+            if hasattr(self, "_run_progress"):
+                try:
+                    self._run_progress.pack(side="left", padx=(12, 0), pady=0)
+                    self._run_progress.start()
+                except Exception:
+                    pass
         else:
             self.generate_btn.configure(text="▶  生成日志", state="normal",
-                                       fg_color=self.styles.colors['success'],
-                                       hover_color="#059669")
+                                       fg_color=c['success'],
+                                       hover_color=c['success_hover'])
             self._update_status("就绪", "success")
+            if hasattr(self, "_run_progress"):
+                try:
+                    self._run_progress.stop()
+                    self._run_progress.pack_forget()
+                except Exception:
+                    pass
 
     def _switch_tab(self, tab_name):
         """切换标签页（Segmented Control 风格）"""
@@ -1916,17 +2476,19 @@ class Git2LogsGUI:
                 self.tab_frames[tab_name].pack(fill="x", expand=False, padx=20, pady=20)
                 self.current_tab = tab_name
             
-            # 更新侧边栏导航高亮（微信风格）
+            # 更新侧边栏导航高亮（图标用 CTkImage 灰/强调色切换）
             if hasattr(self, '_sidebar_btns'):
-                for name, (item_frame, icon_lbl, text_lbl) in self._sidebar_btns.items():
+                for name, tpl in self._sidebar_btns.items():
+                    if len(tpl) < 3:
+                        continue
+                    item_frame, icon_lbl, text_lbl = tpl[0], tpl[1], tpl[2]
                     if name == tab_name:
                         item_frame.configure(fg_color=self._sidebar_selected_bg())
-                        icon_lbl.configure(text_color=self.styles.colors['accent'])
                         text_lbl.configure(text_color=self.styles.colors['accent'])
                     else:
                         item_frame.configure(fg_color="transparent")
-                        icon_lbl.configure(text_color=self.styles.colors['text_secondary'])
                         text_lbl.configure(text_color=self.styles.colors['text_secondary'])
+                self._apply_sidebar_icon_images()
             
             # 立即滚动到顶部（兼容不同版本的 CTkScrollableFrame）
             if hasattr(self, 'scroll_container'):
