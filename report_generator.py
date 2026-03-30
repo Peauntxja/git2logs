@@ -872,23 +872,11 @@ def generate_daily_report(all_results, author_name, since_date=None, until_date=
         commits = project_info['commits']
         
         lines.append(f"### {project.name} ({project_path})\n")
-        lines.append(f"**项目链接**: [{project.web_url}]({project.web_url})\n")
-        lines.append(f"**提交数**: {len(commits)} 次\n")
-        
-        # 工作类型统计
-        if project_info['types']:
-            type_summary_parts = []
-            for t, c in sorted(project_info['types'].items(), key=lambda x: x[1], reverse=True):
-                # 获取该类型的 emoji
-                type_emoji = analyze_commit_type('')[1]  # 默认
-                for item in commits:
-                    if item['type'] == t:
-                        type_emoji = item['emoji']
-                        break
-                type_summary_parts.append(f"{type_emoji} {t}: {c}次")
-            lines.append(f"**工作类型**: {', '.join(type_summary_parts)}\n")
-        
-        lines.append("\n**提交记录**:\n\n")
+        # 链接与条数合并为一行；类型以每条提交前缀为准，避免重复统计
+        lines.append(
+            f"**项目链接**: [{project.web_url}]({project.web_url}) · {len(commits)} 次\n\n"
+        )
+        lines.append("**提交记录**:\n\n")
         
         for idx, item in enumerate(commits, 1):
             commit = item['commit']

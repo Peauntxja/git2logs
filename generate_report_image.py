@@ -40,8 +40,17 @@ def parse_daily_report(file_path):
         feat_count = int(feat_matches[0]) if feat_matches else 0
         bug_count = int(bug_matches[0]) if bug_matches else 0
         
-        # 提取项目详情
-        project_sections = re.findall(r'### (.*?) \(([^)]+)\)\n\*\*项目链接\*\*.*?\n\*\*提交数\*\*: (\d+) 次', content, re.DOTALL)
+        # 提取项目详情（兼容：单行「链接 · N 次」与旧版「提交数」分行）
+        project_sections = re.findall(
+            r'### (.*?) \(([^)]+)\)\n\*\*项目链接\*\*: \[[^\]]+\]\([^)]+\)\s*·\s*(\d+)\s*次',
+            content,
+        )
+        if not project_sections:
+            project_sections = re.findall(
+                r'### (.*?) \(([^)]+)\)\n\*\*项目链接\*\*.*?\n\*\*提交数\*\*: (\d+) 次',
+                content,
+                re.DOTALL,
+            )
         projects_data = []
         for match in project_sections:
             projects_data.append({
