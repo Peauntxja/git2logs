@@ -71,11 +71,7 @@ $PYINSTALLER_CMD --name="MIZUKI-TOOLBOX" \
     --exclude-module grpc \
     --exclude-module google.cloud \
     --exclude-module googleapiclient.discovery_cache \
-    --exclude-module PIL.ImageQt \
-    --exclude-module PIL.ImageShow \
-    --exclude-module PIL.ImageGrab \
-    --exclude-module PIL.ImageTransform \
-    --exclude-module PIL.ImageWin \
+    --exclude-module PIL \
     --add-data "git2logs.py:." \
     --add-data "config.py:." \
     --add-data "models.py:." \
@@ -110,13 +106,11 @@ $PYINSTALLER_CMD --name="MIZUKI-TOOLBOX" \
     --hidden-import=report_generator \
     --hidden-import=service \
     --hidden-import=image_converter \
+    --hidden-import=utils.date_utils \
     --hidden-import=customtkinter \
     --hidden-import=openpyxl \
     --hidden-import=openpyxl.styles \
     --hidden-import=et_xmlfile \
-    --hidden-import=PIL \
-    --hidden-import=PIL.Image \
-    --hidden-import=PIL.ImageTk \
     $ICON_PARAM \
     git2logs_gui_ctk.py
 
@@ -142,14 +136,8 @@ if [ -d "dist" ]; then
         # lxml（~9MB，项目未直接使用）
         rm -rf "$INTERNAL_DIR/lxml"
         
-        # Pillow 多余的编解码 dylibs（~5MB，仅需基础图像操作）
-        rm -f "$INTERNAL_DIR/PIL/.dylibs/libavif"*
-        rm -f "$INTERNAL_DIR/PIL/.dylibs/libheif"*
-        rm -f "$INTERNAL_DIR/PIL/.dylibs/libde265"*
-        rm -f "$INTERNAL_DIR/PIL/.dylibs/libSvtAv1Enc"*
-        rm -f "$INTERNAL_DIR/PIL/.dylibs/librav1e"*
-        rm -f "$INTERNAL_DIR/PIL/.dylibs/libaom"*
-        rm -f "$INTERNAL_DIR/PIL/.dylibs/libdav1d"*
+        # PIL（项目已不再使用 Pillow）
+        rm -rf "$INTERNAL_DIR/PIL"
         
         # 计算清理后大小
         CLEANED_SIZE=$(du -sh "dist/MIZUKI-TOOLBOX" 2>/dev/null | cut -f1)

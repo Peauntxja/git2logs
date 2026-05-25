@@ -12,9 +12,13 @@ import math
 from datetime import datetime
 from collections import defaultdict
 
-from utils.date_utils import parse_iso_date
 from config import ReportConfig
 from commit_analysis import analyze_commit_type
+
+
+def _parse_iso_date(date_string: str) -> datetime:
+    """解析 ISO 格式日期字符串（处理 Z 时区后缀）"""
+    return datetime.fromisoformat(date_string.replace('Z', '+00:00'))
 
 logger = logging.getLogger(__name__)
 
@@ -173,7 +177,7 @@ def calculate_work_hours(all_results, since_date=None, until_date=None,
             # 解析日期
             commit_date = commit.committed_date
             if isinstance(commit_date, str):
-                date_obj = parse_iso_date(commit_date)
+                date_obj = _parse_iso_date(commit_date)
             else:
                 date_obj = commit_date
             date_str = date_obj.strftime('%Y-%m-%d')
