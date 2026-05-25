@@ -18,13 +18,12 @@ except ImportError:
 from tkinter import messagebox, filedialog
 import threading
 import queue
-import subprocess
-from pathlib import Path
+import traceback
 from datetime import datetime
 
 import logging
 
-from config import AIConfig, GUIConfig, ReportConfig
+from config import AIConfig, ReportConfig
 
 logger = logging.getLogger(__name__)
 
@@ -140,119 +139,8 @@ def _resolve_monospace_font(root, size=10):
     return ("Courier", size)
 
 
-# 侧栏 PIL 失败时的单字回显（与 _create_sidebar 的 tab 名一致）
-_SIDEBAR_TAB_GLYPHS = {
-    "GitLab配置": "配",
-    "日期和输出": "日",
-    "AI分析": "A",
-    "Excel导出": "表",
-}
 
 
-def _hex_to_rgb(color_hex: str):
-    h = color_hex.lstrip("#")
-    return tuple(int(h[i : i + 2], 16) for i in (0, 2, 4))
-
-
-def _pil_sidebar_icon(kind: str, color_hex: str, size: int = 24):
-    """单色线框风侧栏图标（近似工具类 App 的灰度图标，避免彩色 emoji）。"""
-    import math
-    from PIL import Image, ImageDraw
-
-    rgb = _hex_to_rgb(color_hex)
-    fill = rgb + (255,)
-    im = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    dr = ImageDraw.Draw(im)
-    lw = max(1, round(size / 13))
-    s = float(size)
-    m = round(s * 0.14)
-    def rr(xy, radius, **kw):
-        try:
-            dr.rounded_rectangle(xy, radius=radius, **kw)
-        except Exception:
-            dr.rectangle(xy, **kw)
-
-    if kind == "gear":
-        cx, cy = s / 2, s / 2
-        r_outer = s * 0.34
-        r_inner = s * 0.17
-        dr.ellipse(
-            [cx - r_outer, cy - r_outer, cx + r_outer, cy + r_outer],
-            outline=fill,
-            width=lw,
-        )
-        dr.ellipse(
-            [cx - r_inner, cy - r_inner, cx + r_inner, cy + r_inner],
-            outline=fill,
-            width=lw,
-        )
-        n = 6
-        tooth = s * 0.11
-        for i in range(n):
-            a = (i * 2 * math.pi / n) - math.pi / 2
-            x0 = cx + (r_outer - lw * 0.5) * math.cos(a)
-            y0 = cy + (r_outer - lw * 0.5) * math.sin(a)
-            x1 = cx + (r_outer + tooth) * math.cos(a)
-            y1 = cy + (r_outer + tooth) * math.sin(a)
-            dr.line([(x0, y0), (x1, y1)], fill=fill, width=lw)
-
-    elif kind == "calendar":
-        x0, y0 = m, round(s * 0.24)
-        x1, y1 = size - m, size - m
-        rr([x0, y0, x1, y1], radius=max(2, lw), outline=fill, width=lw)
-        y_split = y0 + round(s * 0.15)
-        dr.line([(x0 + lw, y_split), (x1 - lw, y_split)], fill=fill, width=lw)
-        dr.line([(round(s * 0.34), y0), (round(s * 0.34), y0 - round(s * 0.09))], fill=fill, width=lw)
-        dr.line([(round(s * 0.66), y0), (round(s * 0.66), y0 - round(s * 0.09))], fill=fill, width=lw)
-        dot_r = max(1, round(s * 0.045))
-        for gx, gy in (
-            (0.30, 0.58),
-            (0.50, 0.58),
-            (0.70, 0.58),
-            (0.30, 0.74),
-            (0.50, 0.74),
-            (0.70, 0.74),
-        ):
-            cx, cy = round(s * gx), round(s * gy)
-            dr.ellipse([cx - dot_r, cy - dot_r, cx + dot_r, cy + dot_r], outline=fill, width=1)
-
-    elif kind == "chip":
-        body = [round(s * 0.26), round(s * 0.30), round(s * 0.74), round(s * 0.70)]
-        rr(body, radius=max(2, lw + 1), outline=fill, width=lw)
-        pin_h = max(2, round(s * 0.055))
-        for py in (round(s * 0.40), round(s * 0.48), round(s * 0.56)):
-            dr.rectangle(
-                [round(s * 0.14), py, round(s * 0.24), py + pin_h],
-                outline=fill,
-                width=1,
-            )
-            dr.rectangle(
-                [round(s * 0.76), py, round(s * 0.86), py + pin_h],
-                outline=fill,
-                width=1,
-            )
-        # 内部线路示意
-        mid_y = round(s * 0.50)
-        dr.line(
-            [(round(s * 0.34), mid_y), (round(s * 0.66), mid_y)],
-            fill=fill,
-            width=max(1, lw - 1),
-        )
-
-    elif kind == "chart":
-        base = size - m
-        dr.line([(m, base), (size - m, base)], fill=fill, width=lw)
-        bars = [
-            [round(s * 0.24), round(s * 0.56), round(s * 0.33), base - lw],
-            [round(s * 0.42), round(s * 0.40), round(s * 0.51), base - lw],
-            [round(s * 0.60), round(s * 0.28), round(s * 0.69), base - lw],
-        ]
-        for bx in bars:
-            rr(bx, radius=2, outline=fill, width=lw)
-    else:
-        dr.ellipse([m, m, size - m, size - m], outline=fill, width=lw)
-
-    return im
 
 
 class Git2LogsGUI:
@@ -290,12 +178,7 @@ class Git2LogsGUI:
             self._theme_radio_buttons: list = []
             self._responsive_wrap_labels: list = []
             self._resize_wrap_job = None
-            self._sidebar_icon_by_tab: dict = {}
-            self._sidebar_icon_assets: list = []
-            self._sidebar_icon_pills: list = []
             self._sidebar_pill_by_tab: dict = {}
-            self._sidebar_icon_px = 22
-            self._sidebar_icons_text_fallback = False
 
             # 配置 CustomTkinter 主题
             ctk.set_appearance_mode("dark")  # 强制暗黑模式
@@ -323,18 +206,14 @@ class Git2LogsGUI:
             main_container.pack(fill="both", expand=True, padx=0, pady=0)
             self._main_container = main_container
             
-            # ── 顶部 Header 栏 ─────────────────────────────
-            self._create_header(main_container)
-
-            # 立即更新，显示标题
+            # 立即更新，显示框架
             root.update_idletasks()
             root.update()
 
             # 存储标签页引用
             self.tab_frames = {}
             self.current_tab = None
-            self.tab_buttons = []   # 兼容旧代码，sidebar 创建后填充
-            self._sidebar_btns = {}  # {tab_name: (frame, icon_lbl, text_lbl, kind)}
+            self._sidebar_btns = {}
 
             # ── 底部固定操作按钮容器 ───────────────────────
             self.bottom_actions_frame = ctk.CTkFrame(main_container, fg_color=self.styles.colors['bg_main'], corner_radius=0)
@@ -437,7 +316,6 @@ class Git2LogsGUI:
                     self.log("请填写参数后点击'▶ 生成日志'按钮。", "info")
                     self.root.after(120, self._sync_responsive_wraplengths)
                 except Exception as e:
-                    import traceback
                     self.log(f"初始化错误: {str(e)}", "error")
                     self.log(traceback.format_exc(), "error")
             
@@ -445,7 +323,6 @@ class Git2LogsGUI:
             root.after(10, delayed_init)
             
         except Exception as e:
-            import traceback
             error_msg = f"界面初始化失败: {str(e)}\n\n{traceback.format_exc()}"
             print(error_msg)
             try:
@@ -497,89 +374,7 @@ class Git2LogsGUI:
     def _on_sidebar_leave_pill(self, tab_name):
         self._apply_sidebar_pill_style(tab_name)
 
-    def _apply_sidebar_text_glyphs(self):
-        """无 Pillow 时用单字占位，仍保持灰 / 强调色与选中态一致。"""
-        ct = getattr(self, "current_tab", None)
-        c = self.styles.colors
-        glyph_font = _ctk_ui_font(12, "bold")
-        for name, tpl in self._sidebar_btns.items():
-            if len(tpl) < 4:
-                continue
-            icon_lbl = tpl[1]
-            g = _SIDEBAR_TAB_GLYPHS.get(name, "·")
-            col = c["accent"] if name == ct else c["text_secondary"]
-            try:
-                icon_lbl.configure(text=g, text_color=col, font=glyph_font, image=None)
-            except TypeError:
-                try:
-                    icon_lbl.configure(text=g, text_color=col, font=glyph_font)
-                except Exception:
-                    logger.debug("配置侧栏图标文字(降级)失败")
-            except Exception:
-                logger.debug("配置侧栏图标文字失败")
-
-    def _apply_sidebar_icon_images(self):
-        """按 current_tab 切换侧栏图标（灰 / 强调色）；文字回退模式走字形着色。"""
-        if getattr(self, "_sidebar_icons_text_fallback", False):
-            self._apply_sidebar_text_glyphs()
-            return
-        ct = getattr(self, "current_tab", None)
-        if not getattr(self, "_sidebar_icon_by_tab", None):
-            return
-        for name, tpl in self._sidebar_btns.items():
-            if len(tpl) < 4:
-                continue
-            icon_lbl = tpl[1]
-            pair = self._sidebar_icon_by_tab.get(name)
-            if not pair:
-                continue
-            img_m, img_a = pair
-            try:
-                icon_lbl.configure(image=img_a if name == ct else img_m, text="")
-            except Exception:
-                logger.debug("配置侧栏图标图片失败")
-
-    def _rebuild_sidebar_icons(self):
-        """按当前主题重绘侧栏矢量图标（PIL → CTkImage）。"""
-        if not getattr(self, "_sidebar_btns", None):
-            return
-        try:
-            px = getattr(self, "_sidebar_icon_px", 22)
-            pil_sz = max(26, px + 4)
-            c = self.styles.colors
-            self._sidebar_icon_by_tab = {}
-            self._sidebar_icon_assets = []
-            for name, tpl in self._sidebar_btns.items():
-                if len(tpl) < 4:
-                    continue
-                _frame, icon_lbl, _text, kind = tpl[:4]
-                pil_m = _pil_sidebar_icon(kind, c["text_secondary"], size=pil_sz)
-                pil_a = _pil_sidebar_icon(kind, c["accent"], size=pil_sz)
-                img_m = ctk.CTkImage(light_image=pil_m, dark_image=pil_m, size=(px, px))
-                img_a = ctk.CTkImage(light_image=pil_a, dark_image=pil_a, size=(px, px))
-                self._sidebar_icon_assets.extend([img_m, img_a])
-                self._sidebar_icon_by_tab[name] = (img_m, img_a)
-            self._sidebar_icons_text_fallback = False
-            self._apply_sidebar_icon_images()
-        except Exception:
-            self._sidebar_icons_text_fallback = True
-            self._sidebar_icon_by_tab = {}
-            self._sidebar_icon_assets = []
-            self._apply_sidebar_text_glyphs()
     
-    def _create_header(self, parent):
-        """创建顶部 Header 栏（无侧栏品牌占位，仅右侧工作区 topbar）"""
-        header = ctk.CTkFrame(parent, fg_color=self.styles.colors["bg_main"], height=0, corner_radius=0)
-        header.pack(fill="x", side="top")
-        header.pack_propagate(False)
-        self._header_frame = header
-
-        sep = ctk.CTkFrame(header, fg_color=self.styles.colors['border'], height=0, corner_radius=0)
-        sep.pack(side="bottom", fill="x")
-        self._header_sep = sep
-
-        self._header_brand_lbl = ctk.CTkLabel(header, text="", height=0, fg_color="transparent")
-        self._header_sub_lbl = ctk.CTkLabel(header, text="", height=0, fg_color="transparent")
 
     def _create_sidebar(self, parent):
         """创建左侧导航：CodexPlusPlus 风格横向文字导航，208px 宽。"""
@@ -590,7 +385,6 @@ class Git2LogsGUI:
             ("Excel导出", "📊", "Excel 导出"),
         ]
 
-        self._sidebar_icon_pills.clear()
         self._sidebar_pill_by_tab.clear()
 
         # 品牌区
@@ -670,7 +464,6 @@ class Git2LogsGUI:
                 w.bind("<Leave>", lambda e, n=tab_name: self._on_sidebar_leave_pill(n))
 
             self._sidebar_btns[tab_name] = (nav_btn, icon_lbl, text_lbl, glyph)
-            self.tab_buttons.append((tab_name, nav_btn))
 
     def _create_log_area(self, parent):
         """创建日志显示区域（放在最上方）"""
@@ -826,8 +619,6 @@ class Git2LogsGUI:
             except Exception:
                 logger.debug("主题更新: 配置滚动条颜色失败")
 
-        if hasattr(self, "_header_frame"):
-            self._header_frame.configure(fg_color=c['bg_main'])
         if hasattr(self, "_topbar_frame"):
             self._topbar_frame.configure(fg_color=c['bg_card'])
         if hasattr(self, "_topbar_title"):
@@ -1479,25 +1270,6 @@ class Git2LogsGUI:
         else:
             self._validate_repo_url()
 
-    def _get_form_validation_summary(self):
-        """获取表单验证摘要"""
-        fields = ['gitlab_url', 'repo', 'author', 'token']
-        results = {}
-
-        for field in fields:
-            entry = self._find_entry_by_variable(getattr(self, field))
-            if entry:
-                border_color = entry.cget('border_color')
-                if border_color == self.styles.colors['error']:
-                    results[field] = 'error'
-                elif border_color == self.styles.colors['warning']:
-                    results[field] = 'warning'
-                elif border_color == self.styles.colors['success']:
-                    results[field] = 'success'
-                else:
-                    results[field] = 'neutral'
-
-        return results
 
     def _enhance_form_interaction(self):
         """增强表单交互体验"""
@@ -2440,7 +2212,6 @@ class Git2LogsGUI:
             self._show_toast("Excel 导出失败", "error")
             self.root.after(0, lambda: messagebox.showerror("导出失败", str(e)))
         except Exception as e:
-            import traceback
             self.log(f"导出异常: {e}", "error")
             self.log(traceback.format_exc(), "error")
             self._show_toast("Excel 导出异常", "error")
@@ -2706,7 +2477,6 @@ class Git2LogsGUI:
         if abs(current_width - self._last_resize_width) < 20:
             return
         self._last_resize_width = current_width
-        self.root.after(100, lambda w=current_width: self._adapt_tab_labels(w))
         if self._resize_wrap_job is not None:
             try:
                 self.root.after_cancel(self._resize_wrap_job)
@@ -2718,10 +2488,6 @@ class Git2LogsGUI:
         """防抖：窗口缩放后的文案换行宽度"""
         self._resize_wrap_job = None
         self._sync_responsive_wraplengths()
-
-    def _adapt_tab_labels(self, _width):
-        """侧边栏模式下标签已固定为短文字，无需响应式调整"""
-        pass
 
     def _set_running_state(self, is_running: bool):
         """切换运行状态，同步更新按钮和状态指示"""
@@ -3090,98 +2856,6 @@ class Git2LogsGUI:
             self.log(f"启动生成任务失败: {str(e)}", "error")
             self._reset_button_state()
     
-    def _collect_report_params(self):
-        """从 GUI 控件收集报告生成参数，返回参数字典或 None（校验失败时）"""
-        from datetime import datetime, timezone
-        from models import ReportParams
-
-        gitlab_url = self.gitlab_url.get().strip()
-        token = self.token.get().strip()
-        author = self.author.get().strip()
-        repo = self.repo.get().strip()
-        branch = self.branch.get().strip() or None
-
-        placeholder_text = "https://gitlab.com 或 http://gitlab.yourcompany.com"
-        if gitlab_url == placeholder_text:
-            gitlab_url = ""
-
-        if not gitlab_url or not token or not author:
-            self.log("错误: 请填写GitLab URL、访问令牌和提交者", "error")
-            self.root.after(0, lambda: messagebox.showerror("错误", "请填写GitLab URL、访问令牌和提交者"))
-            return None
-
-        since_date = None
-        until_date = None
-
-        if self.use_today.get():
-            today_local = datetime.now()
-            since_date = today_local.strftime('%Y-%m-%d')
-            until_date = since_date
-        else:
-            since_str = self.since_date.get().strip()
-            until_str = self.until_date.get().strip()
-            if since_str and not until_str:
-                until_str = since_str
-            if until_str and not since_str:
-                since_str = until_str
-            since_date = since_str or None
-            until_date = until_str or None
-            if since_date and until_date:
-                try:
-                    datetime.strptime(since_date, '%Y-%m-%d')
-                    datetime.strptime(until_date, '%Y-%m-%d')
-                except ValueError as e:
-                    self.log(f"错误: 日期格式无效 - {str(e)}", "error")
-                    self.root.after(0, lambda: messagebox.showerror("错误", f"日期格式无效: {str(e)}"))
-                    return None
-
-        output_format = self.output_format.get() if hasattr(self, 'output_format') else "daily_report"
-
-        return ReportParams(
-            gitlab_url=gitlab_url,
-            token=token,
-            author=author,
-            since_date=since_date,
-            until_date=until_date,
-            branch=branch,
-            output_format=output_format,
-            output_path=self.output_file.get().strip() if hasattr(self, 'output_file') else '',
-            scan_all=self.scan_all.get() or not repo,
-            repo_url=repo,
-        )
-
-    def _setup_gui_log_handler(self):
-        """设置 GUI 日志重定向 handler，返回 (root_logger, gui_handler)"""
-        import logging as _logging
-
-        class _GUILogHandler(_logging.Handler):
-            def __init__(self, gui_log_func):
-                super().__init__()
-                self.gui_log_func = gui_log_func
-
-            def emit(self, record):
-                try:
-                    msg = self.format(record)
-                    log_type = "error" if record.levelno >= _logging.ERROR else "warning" if record.levelno >= _logging.WARNING else "info"
-                    self.gui_log_func(msg, log_type)
-                except Exception:
-                    pass
-
-        gui_handler = _GUILogHandler(self.log)
-        gui_handler.setLevel(_logging.INFO)
-        gui_handler.setFormatter(_logging.Formatter('%(levelname)s - %(message)s'))
-
-        root_logger = _logging.getLogger()
-        try:
-            if hasattr(self, "_gui_log_handler") and self._gui_log_handler in root_logger.handlers:
-                root_logger.removeHandler(self._gui_log_handler)
-        except Exception:
-            pass
-        root_logger.addHandler(gui_handler)
-        self._gui_log_handler = gui_handler
-        root_logger.setLevel(_logging.INFO)
-
-        return root_logger, gui_handler
 
     def _run_git2logs_direct(self):
         """在后台线程中执行git2logs（延迟导入模块以提高启动速度）"""
@@ -3537,7 +3211,6 @@ class Git2LogsGUI:
             
         except Exception as e:
             self.log(f"生成失败: {str(e)}", "error")
-            import traceback
             self.log(traceback.format_exc(), "error")
             self.root.after(0, lambda: messagebox.showerror("错误", f"生成失败: {str(e)}"))
             self._reset_button_state()
@@ -3731,7 +3404,6 @@ class Git2LogsGUI:
             self.root.after(0, lambda: messagebox.showerror("错误", f"网络连接失败: {error_msg}"))
         except Exception as e:
             self.log(f"AI分析失败: {str(e)}", "error")
-            import traceback
             self.log(traceback.format_exc(), "error")
             self._show_toast("AI 分析失败", "error")
             self.root.after(0, lambda: messagebox.showerror("错误", f"AI分析失败: {str(e)}"))
@@ -3806,7 +3478,6 @@ class Git2LogsGUI:
             
         except Exception as e:
             self.log(f"AI分析失败: {str(e)}", "error")
-            import traceback
             self.log(traceback.format_exc(), "error")
             self._show_toast("AI 分析失败", "error")
             self.root.after(0, lambda: messagebox.showerror("错误", f"AI分析失败: {str(e)}"))
@@ -3861,7 +3532,6 @@ class Git2LogsGUI:
                     
         except Exception as e:
             error_msg = str(e) or "未知错误 (可能是库内部类型错误)"
-            import traceback
             print(f"AI连接测试异常: {error_msg}")
             traceback.print_exc()
             
@@ -3916,7 +3586,6 @@ def main():
             try:
                 app = Git2LogsGUI(root)
             except Exception as e:
-                import traceback
                 error_msg = f"界面初始化失败: {str(e)}\n\n{traceback.format_exc()}"
                 print(error_msg)
                 messagebox.showerror("初始化错误", error_msg)
@@ -3928,7 +3597,6 @@ def main():
         root.mainloop()
         
     except Exception as e:
-        import traceback
         error_msg = f"程序启动失败: {str(e)}\n\n{traceback.format_exc()}"
         print(error_msg)
         try:
