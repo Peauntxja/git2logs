@@ -20,7 +20,6 @@ from pathlib import Path
 
 try:
     import openpyxl
-    from openpyxl.styles import Font, PatternFill, Alignment, Border
     OPENPYXL_AVAILABLE = True
 except ImportError:
     OPENPYXL_AVAILABLE = False
