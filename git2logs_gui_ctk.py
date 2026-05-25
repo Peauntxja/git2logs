@@ -17,6 +17,7 @@ except ImportError:
 
 from tkinter import messagebox, filedialog
 import threading
+import queue
 import subprocess
 from pathlib import Path
 from datetime import datetime
@@ -265,6 +266,7 @@ class Git2LogsGUI:
             # 保存待处理的AI分析数据
             self._pending_ai_data = None
             self._log_count = 0
+            self._log_queue = queue.Queue()
             self._is_running = False  # 跟踪生成任务运行状态
             self._ai_is_running = False  # 跟踪AI分析任务运行状态
             self._work_hours_data = None  # 缓存工时数据，供Excel导出使用
@@ -393,6 +395,9 @@ class Git2LogsGUI:
                     # 绑定表单验证（在控件创建完成后）
                     self._bind_form_validation()
                     self._enhance_form_interaction()
+
+                    # 启动日志队列轮询（后台线程通过 queue 安全传递日志）
+                    self._poll_log_queue()
 
                     # 初始日志
                     self.log("欢迎使用 MIZUKI-GITLAB工具箱！", "info")
@@ -2159,7 +2164,7 @@ class Git2LogsGUI:
         # ── 工时规则说明 ─────────────────────────────────
         self._excel_rule_label = ctk.CTkLabel(
             content,
-            text="工时规则：单条任务 ≥1h（不足自动补齐），单条任务 ≤8h（超额截断）；同一天工时 <1h 的多条任务自动合并",
+            text="工时规则：单条任务 ≥2h（不足自动汇总），单条任务 ≤8h（超额截断）；同一天小任务（<2h）会压缩为“任务汇总”条目，且导出工时为整数",
             font=ctk.CTkFont(size=11),
             text_color=self.text_secondary,
             anchor="w",
@@ -2329,7 +2334,6 @@ class Git2LogsGUI:
             return
 
         self._excel_export_btn.configure(state="disabled")
-        import threading
         t = threading.Thread(
             target=self._perform_excel_export,
             args=(template, output, selected if self._project_checkboxes else None),
@@ -2788,7 +2792,6 @@ class Git2LogsGUI:
             else:
                 entry.configure(show='*')
             entry.focus_set()
-            self.root.update_idletasks()
         except Exception:
             logger.debug("切换令牌可见性失败")
     
@@ -2800,7 +2803,6 @@ class Git2LogsGUI:
             else:
                 entry.configure(show='*')
             entry.focus_set()
-            self.root.update_idletasks()
         except Exception:
             logger.debug("切换API Key可见性失败")
     
@@ -2811,7 +2813,6 @@ class Git2LogsGUI:
                 self.ai_config_frame.grid()
             else:
                 self.ai_config_frame.grid_remove()
-            self.root.update_idletasks()
         except Exception:
             logger.debug("切换AI配置区域显示失败")
     
@@ -2824,76 +2825,92 @@ class Git2LogsGUI:
             else:
                 self.since_entry.configure(state="normal")
                 self.until_entry.configure(state="normal")
-            self.root.update_idletasks()
         except Exception:
             logger.debug("切换日期输入框状态失败")
     
     def on_output_format_changed(self, *args):
         """输出格式变化时的回调"""
         try:
-            # 统一显示为"输出目录"，因为无论什么格式都选择文件夹
             self.output_label.configure(text="输出目录")
             format_value = self.output_format.get()
             if format_value == "all":
                 self.output_hint.configure(text="提示: 批量生成时，所有文件将保存到选择的目录")
             else:
                 self.output_hint.configure(text="提示: 生成的文件将保存到选择的目录")
-            self.root.update_idletasks()
         except Exception:
             logger.debug("更新输出格式提示失败")
     
     def browse_output_file(self):
         """浏览输出目录（统一选择文件夹来存放生成的文件）"""
         try:
-            # 无论什么格式，都选择文件夹来存放生成的文件
             directory = filedialog.askdirectory(
                 title="选择输出目录（生成的文件将保存到此文件夹）",
                 initialdir=self.output_file.get().strip() or os.getcwd()
             )
             if directory:
                 self.output_file.set(directory)
-            self.root.update_idletasks()
         except Exception as e:
             messagebox.showerror("错误", f"选择目录失败: {str(e)}")
     
-    def log(self, message, log_type="info"):
-        """添加日志消息（带颜色前缀），通过批量刷新提升性能。"""
+    def _poll_log_queue(self):
+        """定时从队列批量取出日志，降低主线程事件循环压力。"""
         try:
-            import threading
-            if threading.current_thread() is not threading.main_thread():
+            batch = []
+            while len(batch) < 80:
                 try:
-                    self.root.after(0, lambda: self.log(message, log_type))
-                except Exception:
-                    logger.debug("跨线程调度日志输出失败")
+                    batch.append(self._log_queue.get_nowait())
+                except queue.Empty:
+                    break
+
+            if batch:
+                for message, log_type in batch:
+                    self._enqueue_log_entry(message, log_type)
+                if not self._log_flush_scheduled:
+                    self._log_flush_scheduled = True
+                    self.root.after(150, self._flush_logs)
+        except Exception:
+            logger.debug("轮询日志队列失败")
+        finally:
+            self.root.after(80, self._poll_log_queue)
+
+    def log(self, message, log_type="info"):
+        """添加日志消息。后台线程通过 queue 传递，主线程直接入待写列表。"""
+        try:
+            if threading.current_thread() is not threading.main_thread():
+                self._log_queue.put((message, log_type))
                 return
 
-            filter_level = self._log_filter_level
-            if filter_level == "警告+错误" and log_type not in ("warning", "error"):
-                return
-            if filter_level == "仅错误" and log_type != "error":
-                return
-
-            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-            _PREFIX_MAP = {
-                "error": ("[ERROR]", "error"),
-                "success": ("[SUCCESS]", "success"),
-                "warning": ("[WARNING]", "warning"),
-                "info": ("[INFO]", "info"),
-            }
-            prefix, color_tag = _PREFIX_MAP.get(log_type, ("", "info"))
-            log_message = f"{timestamp} - {prefix} {message}\n"
-
-            self._log_pending.append((log_message, timestamp, prefix, color_tag))
+            self._enqueue_log_entry(message, log_type)
 
             if not self._log_flush_scheduled:
                 self._log_flush_scheduled = True
-                self.root.after(200, self._flush_logs)
+                self.root.after(150, self._flush_logs)
         except Exception:
             logger.debug("写入GUI日志失败")
 
+    def _enqueue_log_entry(self, message, log_type):
+        """将一条日志格式化后加入待写列表（仅主线程调用）。"""
+        filter_level = self._log_filter_level
+        if filter_level == "警告+错误" and log_type not in ("warning", "error"):
+            return
+        if filter_level == "仅错误" and log_type != "error":
+            return
+
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        _PREFIX_MAP = {
+            "error": ("[ERROR]", "error"),
+            "success": ("[SUCCESS]", "success"),
+            "warning": ("[WARNING]", "warning"),
+            "info": ("[INFO]", "info"),
+        }
+        prefix, color_tag = _PREFIX_MAP.get(log_type, ("", "info"))
+        log_message = f"{timestamp} - {prefix} {message}\n"
+
+        self._log_pending.append((log_message, timestamp, prefix, color_tag))
+
     def _flush_logs(self):
-        """批量写入所有待处理的日志消息，减少 UI 更新次数。"""
+        """批量写入所有待处理的日志消息，合并 insert 减少 UI 开销。"""
         self._log_flush_scheduled = False
         if not self._log_pending:
             return
@@ -2915,11 +2932,12 @@ class Git2LogsGUI:
             except Exception:
                 pass
 
-            for log_message, timestamp, prefix, color_tag in pending:
-                start_pos = self.log_text.index("end-1c")
-                self.log_text.insert("end", log_message)
+            combined_text = "".join(msg for msg, _, _, _ in pending)
+            base_line = int(self.log_text.index("end-1c").split('.')[0])
+            self.log_text.insert("end", combined_text)
 
-                line_num = start_pos.split('.')[0]
+            for i, (log_message, timestamp, prefix, color_tag) in enumerate(pending):
+                line_num = str(base_line + i)
                 self.log_text.tag_add("timestamp", f"{line_num}.0", f"{line_num}.{len(timestamp)}")
 
                 if prefix:
@@ -2931,8 +2949,8 @@ class Git2LogsGUI:
                     )
                 self._log_count += 1
 
-            if self._log_count > 1000:
-                lines_to_delete = 100
+            if self._log_count > 800:
+                lines_to_delete = 200
                 self.log_text.delete("1.0", f"{lines_to_delete + 1}.0")
                 self._log_count -= lines_to_delete
                 self._log_omitted_total += lines_to_delete
@@ -2944,26 +2962,26 @@ class Git2LogsGUI:
 
             if should_scroll:
                 self.log_text.see("end")
-
-            self.root.update_idletasks()
         except Exception:
             logger.debug("批量写入GUI日志失败")
     
     def clear_logs(self):
         """清空日志"""
         try:
-            import threading
             if threading.current_thread() is not threading.main_thread():
-                try:
-                    self.root.after(0, self.clear_logs)
-                except Exception:
-                    logger.debug("跨线程调度清空日志失败")
+                self.root.after(0, self.clear_logs)
                 return
 
             self.log_text.delete(1.0, "end")
             self._log_count = 0
             self._log_omitted_total = 0
             self._log_pending.clear()
+            # 清空队列中残留的消息
+            while not self._log_queue.empty():
+                try:
+                    self._log_queue.get_nowait()
+                except queue.Empty:
+                    break
             self.log("日志已清空", "info")
         except Exception:
             logger.debug("清空日志文本失败")
@@ -2980,8 +2998,25 @@ class Git2LogsGUI:
             self._is_running = True
             self._set_running_state(True)
 
-            # 立即更新UI，确保按钮状态变化可见
-            self.root.update_idletasks()
+            # 预收集 GUI 参数（主线程安全读取 Tk 变量）
+            self._cached_params = {
+                'gitlab_url': self.gitlab_url.get().strip(),
+                'token': self.token.get().strip(),
+                'author': self.author.get().strip(),
+                'repo': self.repo.get().strip(),
+                'branch': self.branch.get().strip() or None,
+                'use_today': self.use_today.get(),
+                'since_date': self.since_date.get().strip(),
+                'until_date': self.until_date.get().strip(),
+                'output_format': self.output_format.get() if hasattr(self, 'output_format') else "daily_report",
+                'output_path': self.output_file.get().strip() if hasattr(self, 'output_file') else '',
+                'scan_all': self.scan_all.get() if hasattr(self, 'scan_all') else True,
+                'ai_enabled': self.ai_enabled.get() if hasattr(self, 'ai_enabled') else False,
+                'ai_provider': self.ai_provider.get() if hasattr(self, 'ai_provider') else '',
+                'ai_model': self.ai_model.get() if hasattr(self, 'ai_model') else '',
+                'ai_api_key': self.ai_api_key.get().strip() if hasattr(self, 'ai_api_key') else '',
+                'ai_base_url': self.ai_base_url.get().strip() if hasattr(self, 'ai_base_url') else '',
+            }
 
             # 使用线程启动，避免阻塞UI
             thread = threading.Thread(target=self._run_git2logs_direct, daemon=True)
@@ -3135,14 +3170,13 @@ class Git2LogsGUI:
             self.log("=" * 60, "info")
             self.log("开始生成日志...", "info")
             
-            # 获取配置
-            gitlab_url = self.gitlab_url.get().strip()
-            token = self.token.get().strip()
-            author = self.author.get().strip()
-            repo = self.repo.get().strip()
-            branch_str = self.branch.get().strip()
-            # 如果不输入分支，默认为 None（查询所有分支）
-            branch = branch_str if branch_str else None
+            # 从主线程预收集的缓存中读取参数（避免跨线程访问 Tk 变量）
+            params = self._cached_params
+            gitlab_url = params['gitlab_url']
+            token = params['token']
+            author = params['author']
+            repo = params['repo']
+            branch = params['branch']
             
             # 调试信息：显示使用的参数
             self.log(f"配置参数:", "info")
@@ -3166,7 +3200,7 @@ class Git2LogsGUI:
             # 日期处理
             since_date = None
             until_date = None
-            use_today_value = self.use_today.get()
+            use_today_value = params['use_today']
             self.log(f"调试: '今天'复选框状态: {use_today_value}", "info")
             
             if use_today_value:
@@ -3184,9 +3218,9 @@ class Git2LogsGUI:
                 if today_local_str != today_utc:
                     self.log(f"提示: 本地日期为 {today_local_str}，UTC 日期为 {today_utc}，GitLab API 将使用 UTC 时间查询", "info")
             else:
-                # 从输入框获取日期
-                since_date_str = self.since_date.get().strip()
-                until_date_str = self.until_date.get().strip()
+                # 从预收集参数获取日期
+                since_date_str = params['since_date']
+                until_date_str = params['until_date']
                 self.log(f"调试: 从输入框获取的日期 - 起始: '{since_date_str}', 结束: '{until_date_str}'", "info")
                 
                 # 如果只填写了一个日期，自动扩展日期范围
@@ -3240,7 +3274,7 @@ class Git2LogsGUI:
             all_results = {}
             
             # 如果不输入仓库地址，默认查询所有项目
-            if self.scan_all.get() or not repo:
+            if params['scan_all'] or not repo:
                 self.log("正在扫描所有项目...", "info")
                 self.log(f"提交者: {author}", "info")
                 if branch:
@@ -3330,13 +3364,13 @@ class Git2LogsGUI:
                 return
             
             # 确定输出路径
-            output_path = self.output_file.get().strip()
+            output_path = params['output_path']
             if not output_path:
                 output_path = os.getcwd()
                 self.log(f"未指定输出路径，使用当前目录: {output_path}", "info")
             
             # 根据输出格式生成报告
-            output_format = self.output_format.get()
+            output_format = params['output_format']
             self.log(f"输出格式: {output_format}", "info")
             
             generated_files = {}
@@ -3361,7 +3395,7 @@ class Git2LogsGUI:
                 self.log(f"统计报告已保存: {output_file}", "success")
                 self.log("提示: 统计报告包含本地多维度评价，AI分析需要手动触发", "info")
                 
-                if self.ai_enabled.get() and self.ai_api_key.get().strip():
+                if params['ai_enabled'] and params['ai_api_key']:
                     self._pending_ai_data = {
                         'all_results': all_results,
                         'author': author,

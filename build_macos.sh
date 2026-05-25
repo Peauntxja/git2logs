@@ -64,6 +64,13 @@ $PYINSTALLER_CMD --name="MIZUKI-TOOLBOX" \
     --exclude-module pandas \
     --exclude-module IPython \
     --exclude-module matplotlib \
+    --exclude-module scipy \
+    --exclude-module pytest \
+    --exclude-module numpy \
+    --exclude-module lxml \
+    --exclude-module grpc \
+    --exclude-module google.cloud \
+    --exclude-module googleapiclient.discovery_cache \
     --exclude-module PIL.ImageQt \
     --exclude-module PIL.ImageShow \
     --exclude-module PIL.ImageGrab \
@@ -116,6 +123,38 @@ $PYINSTALLER_CMD --name="MIZUKI-TOOLBOX" \
 # 检查是否成功
 if [ -d "dist" ]; then
     echo "✓ 打包成功！"
+    
+    # 清理不必要的大型依赖文件（减少产物体积）
+    INTERNAL_DIR="dist/MIZUKI-TOOLBOX/_internal"
+    if [ -d "$INTERNAL_DIR" ]; then
+        echo "清理不必要的依赖文件..."
+        
+        # Google API discovery cache（~91MB，项目仅用 Gemini 生成式 AI）
+        rm -rf "$INTERNAL_DIR/googleapiclient/discovery_cache/documents"
+        
+        # gRPC C 扩展（~18MB，Gemini 可用 REST 传输）
+        rm -rf "$INTERNAL_DIR/grpc"
+        
+        # numpy（~6.5MB，项目未直接使用）
+        rm -rf "$INTERNAL_DIR/numpy"
+        rm -rf "$INTERNAL_DIR/numpy-"*.dist-info
+        
+        # lxml（~9MB，项目未直接使用）
+        rm -rf "$INTERNAL_DIR/lxml"
+        
+        # Pillow 多余的编解码 dylibs（~5MB，仅需基础图像操作）
+        rm -f "$INTERNAL_DIR/PIL/.dylibs/libavif"*
+        rm -f "$INTERNAL_DIR/PIL/.dylibs/libheif"*
+        rm -f "$INTERNAL_DIR/PIL/.dylibs/libde265"*
+        rm -f "$INTERNAL_DIR/PIL/.dylibs/libSvtAv1Enc"*
+        rm -f "$INTERNAL_DIR/PIL/.dylibs/librav1e"*
+        rm -f "$INTERNAL_DIR/PIL/.dylibs/libaom"*
+        rm -f "$INTERNAL_DIR/PIL/.dylibs/libdav1d"*
+        
+        # 计算清理后大小
+        CLEANED_SIZE=$(du -sh "dist/MIZUKI-TOOLBOX" 2>/dev/null | cut -f1)
+        echo "✓ 清理完成，产物大小: $CLEANED_SIZE"
+    fi
     
     # onedir 模式下，应用在 dist/MIZUKI-TOOLBOX.app 目录中
     APP_DIR="dist/MIZUKI-TOOLBOX"
