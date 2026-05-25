@@ -6,15 +6,15 @@ Excel 工时模板填充模块
 读取 Excel 模板，将工时分配数据填入对应字段。
 支持的模板字段：任务名称、预计工时、计划开始日期、计划结束日期、任务描述
 
-合并规则：
-- 工时 >= 1h 的任务：保留，每条最高截断至 8h
-- 工时 < 1h 的任务（同一天）：合并为「综合开发」条目
-  - 合并后总工时不足 1h：补齐至 1h
-  - 合并后总工时超过 8h：拆分为多条（每条 ≤ 8h）
+导出规则（简化后）：
+- 工时按权重分配为整数（避免出现小数）
+- 小任务按“任务汇总”合并，尽可能保证单条工时 >= 2h
+- 任务名称与任务描述尽量压缩，避免冗余前缀
 """
 from __future__ import annotations
 
 import logging
+import math
 from copy import copy
 from pathlib import Path
 
@@ -76,51 +76,121 @@ def merge_and_normalize_tasks(tasks: list[dict]) -> list[dict]:
     """
     对任务列表进行合并与规范化（针对同一天的任务）。
 
-    规则：
-    - 工时 >= 1h：保留，单条上限截断至 8h
-    - 工时 < 1h：合并为「综合开发」条目
-        - 合并后不足 1h → 补齐至 1h
-        - 合并后超过 8h → 拆分为多条（每条 ≤ 8h）
+    目标：
+    - 导出工时为整数（避免 0.30 / 0.11 等小数）
+    - 每条输出工时尽可能保证 >= 2h
+    - 压缩任务名称与任务描述：不再出现「综合开发 / 合并小任务 (<1h)」冗余前缀
     """
-    large = [t for t in tasks if t["hours"] >= 1.0]
-    small = [t for t in tasks if t["hours"] < 1.0]
+    if not tasks:
+        return []
+
+    def truncate_text(text: str, max_len: int = 60) -> str:
+        text = (text or "").strip()
+        if len(text) <= max_len:
+            return text
+        return text[: max_len - 1] + "..."
+
+    # 1) 按权重映射到“整数小时”（largest remainder）
+    total_hours = sum(float(t.get("hours", 0) or 0) for t in tasks)
+    if total_hours <= 0:
+        return []
+
+    target_total_int = int(round(total_hours))
+    if target_total_int == 0:
+        return []
+
+    ordered = sorted(
+        tasks,
+        key=lambda t: (float(t.get("hours", 0) or 0), str(t.get("task_name", ""))),
+        reverse=True,
+    )
+
+    exact_alloc = []
+    for t in ordered:
+        h = float(t.get("hours", 0) or 0)
+        exact_alloc.append(h / total_hours * target_total_int)
+
+    floors = [int(math.floor(v + 1e-9)) for v in exact_alloc]
+    fracs = [v - f for v, f in zip(exact_alloc, floors)]
+    remainder = target_total_int - sum(floors)
+
+    allocated_int = floors[:]
+    if remainder > 0:
+        order = sorted(range(len(ordered)), key=lambda i: fracs[i], reverse=True)
+        for k in range(remainder):
+            allocated_int[order[k % len(order)]] += 1
+    elif remainder < 0:
+        order = sorted(range(len(ordered)), key=lambda i: fracs[i])
+        for k in range(-remainder):
+            idx = order[k % len(order)]
+            if allocated_int[idx] > 0:
+                allocated_int[idx] -= 1
+
+    # 2) 将 <2h 的整数任务归为小任务池，并合并成“汇总条目”
+    big_items: list[dict] = []
+    small_items: list[dict] = []
+    for t, alloc, exact in zip(ordered, allocated_int, exact_alloc):
+        alloc_int = int(alloc)
+        if alloc_int <= 0:
+            continue
+        item = {
+            **t,
+            "allocated_hours": alloc_int,
+            "exact_hint": float(exact),
+        }
+        if alloc_int >= 2:
+            big_items.append(item)
+        else:
+            small_items.append(item)
+
+    big_items.sort(key=lambda x: (x["allocated_hours"], x["exact_hint"]), reverse=True)
+    small_items.sort(key=lambda x: (x["allocated_hours"], x["exact_hint"]), reverse=True)
 
     result: list[dict] = []
+    small_total = sum(i["allocated_hours"] for i in small_items)
 
-    # 大任务：单条截断至 8h
-    for t in large:
-        merged = t.copy()
-        merged["hours"] = min(round(t["hours"], 2), 8.0)
-        result.append(merged)
+    # 若小任务合计不足 2h，则并入最高优先级的大任务，避免产生 1h 输出条目
+    if small_items and big_items and small_total < 2:
+        big_items[0]["allocated_hours"] += small_total
+        small_total = 0
 
-    if not small:
-        return result
+    # 输出大任务（单条输出尽量精简）
+    for item in big_items:
+        task_name = truncate_text(str(item.get("task_name", "")))
+        task_type = str(item.get("task_type", "")).strip()
+        description = f"{task_type}：{task_name}".strip("：") if task_type else task_name
+        result.append({
+            "task_name": task_name,
+            "hours": int(item["allocated_hours"]),
+            "start_date": item.get("start_date", ""),
+            "end_date": item.get("end_date", ""),
+            "description": description,
+        })
 
-    # 合并小任务
-    total = sum(t["hours"] for t in small)
-    total = max(total, 1.0)          # 最低 1h
+    # 输出小任务汇总（仅当小任务合计 >=2）
+    if small_items and small_total >= 2:
+        merged_names = [str(i.get("task_name", "")) for i in small_items]
+        preview_names = [truncate_text(n, 30) for n in merged_names[:3]]
 
-    names = [t["task_name"] for t in small]
-    preview = names[:4]
-    merged_name = "综合开发: " + "、".join(preview)
-    if len(names) > 4:
-        merged_name += f" 等{len(names)}项"
-    description = "合并小任务 (<1h): " + "; ".join(names)
-    base = small[0]
+        first = preview_names[0] if preview_names else "小任务"
+        merged_name = f"任务汇总: {first} 等{len(small_items)}项"
+        description = "汇总包含: " + "；".join(preview_names)
+        if len(small_items) > 3:
+            description += f" 等{len(small_items)}项"
 
-    remaining = total
-    while remaining > 0.009:          # 浮点安全阈值
-        chunk = min(remaining, 8.0)
+        base = small_items[0]
         result.append({
             "task_name": merged_name,
-            "hours": round(chunk, 2),
+            "hours": int(small_total),
             "start_date": base.get("start_date", ""),
             "end_date": base.get("end_date", ""),
             "description": description,
-            "project_name": base.get("project_name", ""),
-            "task_type": "综合",
         })
-        remaining -= chunk
+
+    # 兜底：单日总工时理论上为 8，因此输出小时不会超出 8
+    for r in result:
+        if float(r.get("hours", 0) or 0) > 8.0:
+            r["hours"] = 8
 
     return result
 
