@@ -3,7 +3,7 @@ from PyInstaller.utils.hooks import collect_submodules
 
 hiddenimports = collect_submodules("ai_providers")
 
-for pkg in ("openai", "anthropic", "google.generativeai"):
+for pkg in ("openai", "anthropic", "google.genai"):
     try:
         __import__(pkg)
     except ImportError:

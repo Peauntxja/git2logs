@@ -125,7 +125,7 @@ class AiTabMixin:
         model_label.grid(row=config_row, column=0, sticky="w", padx=20, pady=(0, 8))
         self._track_label_primary(model_label)
         
-        self.ai_model = ctk.StringVar(value="gpt-4o-mini")
+        self.ai_model = ctk.StringVar(value="gpt-4.1-mini")
         self.ai_model_combo = ctk.CTkComboBox(self.ai_config_frame,
                                              values=["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"],
                                              variable=self.ai_model,

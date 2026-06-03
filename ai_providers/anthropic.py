@@ -4,13 +4,14 @@
 
 from config import AIConfig
 from ai_analysis import BaseAIService
+from ai_providers.catalog import get_provider_default_model
 
 
 class AnthropicService(BaseAIService):
     """Anthropic Claude AI服务"""
 
     def _get_default_model(self) -> str:
-        return "claude-3-5-sonnet-20241022"
+        return get_provider_default_model("anthropic")
 
     def _make_api_call(self, prompt: str, system_message: str) -> str:
         import anthropic
@@ -20,9 +21,8 @@ class AnthropicService(BaseAIService):
         message = client.messages.create(
             model=self.model,
             max_tokens=AIConfig.MAX_TOKENS,
-            messages=[
-                {"role": "user", "content": f"{system_message}\n\n{prompt}"}
-            ],
+            system=system_message,
+            messages=[{"role": "user", "content": prompt}],
         )
 
         if not message.content or len(message.content) == 0:

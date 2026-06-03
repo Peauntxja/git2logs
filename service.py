@@ -518,17 +518,18 @@ class Git2LogsService:
 
         try:
             service_class = get_ai_service(ai_params.service)
-            service_class(
+            service = service_class(
                 api_key=ai_params.api_key,
                 model=ai_params.model,
                 timeout=AIConfig.CONNECTION_TEST_TIMEOUT,
+                base_url=ai_params.base_url,
             )
 
             if ai_params.service == "gemini":
-                import google.generativeai as genai
-                genai.configure(api_key=ai_params.api_key)
-                model_name = ai_params.model or "gemini-pro"
-                genai.get_model(f"models/{model_name}" if "/" not in model_name else model_name)
+                from google import genai
+
+                client = genai.Client(api_key=ai_params.api_key)
+                client.models.get(model=service.model)
 
             return True
         except Exception as exc:

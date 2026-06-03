@@ -26,7 +26,7 @@ fi
 
 echo "检查依赖..."
 pip3 install python-gitlab customtkinter openpyxl || true
-pip3 install openai anthropic google-generativeai || echo "提示: 部分 AI 依赖未安装，打包后 AI 可能不可用"
+pip3 install openai anthropic google-genai || echo "提示: 部分 AI 依赖未安装，打包后 AI 可能不可用"
 
 echo "清理之前的构建..."
 rm -rf build dist
