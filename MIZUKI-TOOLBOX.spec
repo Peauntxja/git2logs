@@ -134,3 +134,13 @@ coll = COLLECT(
     upx_exclude=[],
     name='MIZUKI-TOOLBOX',
 )
+
+# macOS：生成 .app 包（Windows 仍仅为 onedir 目录）
+if sys.platform == 'darwin':
+    _icon = 'app_icon.icns' if __import__('pathlib').Path('app_icon.icns').exists() else None
+    app = BUNDLE(
+        coll,
+        name='MIZUKI-TOOLBOX.app',
+        icon=_icon,
+        bundle_identifier='com.mizuki.git2logs',
+    )

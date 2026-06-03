@@ -60,39 +60,19 @@ macOS 与 Windows 共用 [`MIZUKI-TOOLBOX.spec`](MIZUKI-TOOLBOX.spec)，由 `bui
 
 ## 手动打包（高级）
 
-如果自动脚本不工作，可以手动使用 PyInstaller：
+请优先使用统一 spec，避免模块遗漏：
 
-### macOS
 ```bash
-pyinstaller --name="GitLab提交日志生成工具" \
-    --windowed \
-    --onefile \
-    --add-data "git2logs.py:." \
-    --add-data "generate_report_image.py:." \
-    --hidden-import=tkinter \
-    --hidden-import=gitlab \
-    git2logs_gui.py
+pyinstaller --clean --noconfirm MIZUKI-TOOLBOX.spec
 ```
 
-### Windows
-```cmd
-pyinstaller --name="GitLab提交日志生成工具" ^
-    --windowed ^
-    --onefile ^
-    --add-data "git2logs.py;." ^
-    --add-data "generate_report_image.py;." ^
-    --hidden-import=tkinter ^
-    --hidden-import=gitlab ^
-    git2logs_gui.py
-```
+macOS 会生成 `dist/MIZUKI-TOOLBOX.app`；Windows 为 `dist/MIZUKI-TOOLBOX/` 目录。
 
 ## 打包后的文件结构
 
-打包后的可执行文件包含：
-- `git2logs_gui.py` - 图形界面主程序
-- `git2logs.py` - 命令行工具
-- `generate_report_image.py` - 图片生成工具
-- 所有 Python 依赖库
+- 入口：`git2logs_gui_ctk.py`（GUI）
+- 业务与 CLI：`service.py`、`cli.py`、`git2logs.py` 等（见 `MIZUKI-TOOLBOX.spec` 的 `datas`）
+- `gui/`、`ai_providers/`、`utils/` 作为数据目录打入 `_internal`
 
 ## 注意事项
 

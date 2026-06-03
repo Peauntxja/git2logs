@@ -55,7 +55,7 @@ python3 git2logs.py --repo <url> --author <name> --token ... -o /tmp/commits.md
 
 ## macOS 打包应用
 
-使用 `dist/MIZUKI-TOOLBOX.app` 重复 GUI 清单第 2–5 项。
+`bash build_macos.sh` 后优先使用 **`dist/MIZUKI-TOOLBOX.app`**（双击或 `open dist/MIZUKI-TOOLBOX.app`）；若无 `.app` 则使用 `dist/MIZUKI-TOOLBOX/`。重复 GUI 清单第 2–5 项。
 
 ## 更新 golden 的时机
 

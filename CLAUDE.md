@@ -11,11 +11,15 @@ MIZUKI-TOOLBOX (git2logs) is a GitLab commit log analysis tool that generates da
 ### Core Components
 
 **Main Application Files:**
-- `git2logs.py` - Core logic: GitLab API integration, commit fetching, daily/hourly report generation
-- `git2logs_gui_ctk.py` - CustomTkinter GUI main file with tabbed interface
-- `ai_analysis.py` - AI analysis module supporting OpenAI, Anthropic, and Google Gemini
+- `git2logs.py` - Public API facade + `analyze_with_ai`
+- `cli.py` - Command-line argument parsing and execution
+- `service.py` - `Git2LogsService` orchestration (reports, Excel, AI)
+- `git2logs_gui_ctk.py` - GUI entry (thin); `gui/` package holds UI mixins
+- `gitlab_client.py`, `commit_analysis.py`, `work_hours.py`, `report_generator.py` - Core domain
+- `report_html.py` - Markdown daily report → HTML; `image_converter.py` - HTML → PNG
+- `generate_report_image.py` - CLI wrapper for HTML/PNG pipeline
+- `ai_analysis.py` + `ai_providers/` - Lazy-loaded AI providers
 - `excel_exporter.py` - Excel work hour template filling and export
-- `generate_report_image.py` - HTML and PNG report generation with Chrome headless
 
 **Utility Modules (`utils/`):**
 - `api_utils.py` - GitLab API wrapper and HTTP request handling
@@ -48,9 +52,7 @@ pip install openai anthropic google-generativeai customtkinter openpyxl
 
 ### Code Validation
 ```bash
-# Syntax checking for modified files
-python3 -m py_compile git2logs.py
-python3 -m py_compile git2logs_gui_ctk.py
+bash scripts/run_tests.sh
 
 # Run GUI application
 python3 git2logs_gui_ctk.py
@@ -95,14 +97,15 @@ rm -rf build dist *.spec
 ### File Modification Strategy
 
 **High-Impact Files (Require Careful Review):**
-- `git2logs.py` - Core business logic (lines 2214+ contain daily report generation)
-- `git2logs_gui_ctk.py` - GUI state management and event handling (UIStyles class for theming)
-- `ai_analysis.py` - Multi-provider AI integration with strategy pattern
+- `service.py`, `report_generator.py` - Report and workflow orchestration
+- `gui/app.py` + `gui/handlers_mixin.py` - GUI behavior and threading
+- `work_hours.py`, `commit_analysis.py` - Allocation and statistics rules
+- `ai_analysis.py` / `ai_providers/` - AI integration
 
 **Utility Files (Safe for Updates):**
 - `utils/` directory - Independent helper functions
-- `excel_exporter.py` - Template-based Excel generation with openpyxl
-- `generate_report_image.py` - HTML/CSS styling and Chrome automation for PNG conversion
+- `report_html.py`, `image_converter.py`, `excel_exporter.py`
+- `cli.py` - CLI wiring (preserve single-repo `--daily-report` filename-only behavior)
 
 ### GUI Architecture
 
@@ -137,8 +140,8 @@ GitLab API → Raw Commits → Pattern Analysis → Statistics → Report Genera
 4. **Validation**: Test with `py_compile` and build verification
 
 ### Report Customization
-- **Daily Report Format**: Modify `generate_daily_report()` function in `git2logs.py` (line ~2214)
-- **HTML Styling**: Update CSS in `generate_report_image.py`
+- **Daily Report Format**: Modify `generate_daily_report()` in `report_generator.py`
+- **HTML Styling**: Update CSS in `report_html.py` (`generate_html_report`)
 - **Excel Templates**: Modify `excel_exporter.py` template handling
 
 ## Build and Deployment
