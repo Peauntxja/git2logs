@@ -14,18 +14,11 @@ from pathlib import Path
 from image_converter import convert_html_to_image
 from report_html import find_markdown_files, generate_html_report, parse_daily_report
 
-# 向后兼容 re-export
 __all__ = [
     "parse_daily_report",
     "generate_html_report",
     "find_markdown_files",
-    "html_to_image_chrome",
 ]
-
-
-def html_to_image_chrome(html_file, output_file):
-    """薄封装，调用 image_converter。"""
-    return convert_html_to_image(html_file, output_file)
 
 
 if __name__ == "__main__":
@@ -66,7 +59,7 @@ if __name__ == "__main__":
             png_file = md_file.parent / f"{base_name}.png"
             generate_html_report(data, str(html_file))
             print("\n正在将 HTML 转换为图片...")
-            if html_to_image_chrome(str(html_file), str(png_file)):
+            if convert_html_to_image(str(html_file), str(png_file)):
                 print(f"✓ 图片已生成: {png_file}")
             else:
                 print(f"⚠ HTML 转图片失败，HTML 已生成: {html_file}")
