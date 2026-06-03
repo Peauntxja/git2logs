@@ -4,6 +4,8 @@
 
 ## 自动化（阶段 0）
 
+推送至 `main` 时 GitHub Actions（`.github/workflows/test.yml`）会运行与本地相同的 unittest。
+
 ```bash
 # 首次或算法变更后，刷新 golden 基准（需 openpyxl）
 python3 scripts/update_golden_fixtures.py

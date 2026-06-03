@@ -38,8 +38,9 @@ macOS 与 Windows 共用 [`MIZUKI-TOOLBOX.spec`](MIZUKI-TOOLBOX.spec)，由 `bui
    ```
 
 3. **结果**
-   - 可执行文件: `dist/GitLab提交日志生成工具`
-   - DMG 文件: `dist/GitLab提交日志生成工具.dmg`（如果系统支持）
+   - 应用目录: `dist/MIZUKI-TOOLBOX`（onedir）
+   - DMG: `dist/MIZUKI-TOOLBOX.dmg`（macOS）
+   - 打包后自动运行 `scripts/audit_bundle.py` 检查禁止依赖
 
 ### Windows
 
