@@ -23,6 +23,15 @@ logger = logging.getLogger(__name__)
 
 AI_SERVICES: Dict[str, type] = {}
 
+# 延迟加载：仅在使用某提供商时才 import 对应 SDK 与实现模块
+_SERVICE_LOADERS: Dict[str, tuple[str, str]] = {
+    "openai": ("ai_providers.openai", "OpenAIService"),
+    "anthropic": ("ai_providers.anthropic", "AnthropicService"),
+    "gemini": ("ai_providers.gemini", "GeminiService"),
+    "doubao": ("ai_providers.doubao", "DoubaoService"),
+    "deepseek": ("ai_providers.deepseek", "DeepSeekService"),
+}
+
 
 def register_ai_service(name: str, service_class: type):
     """注册AI服务类"""
@@ -31,12 +40,19 @@ def register_ai_service(name: str, service_class: type):
 
 
 def get_ai_service(name: str):
-    """获取AI服务类"""
-    service_class = AI_SERVICES.get(name.lower())
-    if not service_class:
-        available = ', '.join(AI_SERVICES.keys())
-        raise ValueError(f"不支持的AI服务: {name}，支持的服务: {available}")
-    return service_class
+    """获取AI服务类（首次访问时加载对应提供商模块）"""
+    import importlib
+
+    key = name.lower()
+    if key not in AI_SERVICES:
+        loader = _SERVICE_LOADERS.get(key)
+        if not loader:
+            available = ", ".join(sorted(_SERVICE_LOADERS.keys()))
+            raise ValueError(f"不支持的AI服务: {name}，支持的服务: {available}")
+        module_name, class_name = loader
+        module = importlib.import_module(module_name)
+        register_ai_service(key, getattr(module, class_name))
+    return AI_SERVICES[key]
 
 
 # ============================================================================
@@ -325,187 +341,7 @@ class OpenAICompatibleService(BaseAIService):
             return super()._handle_error(error)
 
 
-# ============================================================================
-# OpenAI 服务实现
-# ============================================================================
-
-class OpenAIService(OpenAICompatibleService):
-    """OpenAI AI服务"""
-
-    def _get_default_model(self) -> str:
-        return "gpt-4o-mini"
-
-    def _get_json_mode_models(self) -> List[str]:
-        return ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo']
-
-
-# ============================================================================
-# Anthropic 服务实现
-# ============================================================================
-
-class AnthropicService(BaseAIService):
-    """Anthropic Claude AI服务"""
-    
-    def _get_default_model(self) -> str:
-        return "claude-3-5-sonnet-20241022"
-    
-    def _make_api_call(self, prompt: str, system_message: str) -> str:
-        import anthropic
-        from anthropic import APIConnectionError, APIError, AuthenticationError, RateLimitError
-        
-        client = anthropic.Anthropic(api_key=self.api_key, timeout=self.timeout)
-        
-        message = client.messages.create(
-            model=self.model,
-            max_tokens=AIConfig.MAX_TOKENS,
-            messages=[
-                {"role": "user", "content": f"{system_message}\n\n{prompt}"}
-            ]
-        )
-        
-        if not message.content or len(message.content) == 0:
-            raise ValueError("Anthropic API 返回空响应")
-        
-        return message.content[0].text
-    
-    def _handle_error(self, error: Exception) -> Exception:
-        import anthropic
-        from anthropic import APIConnectionError, APIError, AuthenticationError, RateLimitError
-        
-        if isinstance(error, AuthenticationError):
-            return ValueError(f"API密钥无效或已过期。请检查您的Anthropic API Key是否正确。错误详情: {str(error)}")
-        elif isinstance(error, APIConnectionError):
-            return ConnectionError(f"网络连接失败。请检查您的网络连接。错误详情: {str(error)}")
-        elif isinstance(error, RateLimitError):
-            return ValueError(f"API调用频率超限。请稍后重试。错误详情: {str(error)}")
-        elif isinstance(error, APIError):
-            return ValueError(f"Anthropic API错误: {str(error)}")
-        else:
-            return super()._handle_error(error)
-
-
-# ============================================================================
-# Gemini 服务实现
-# ============================================================================
-
-class GeminiService(BaseAIService):
-    """Google Gemini AI服务"""
-    
-    def _get_default_model(self) -> str:
-        return "gemini-3-flash-preview"
-    
-    def _make_api_call(self, prompt: str, system_message: str) -> str:
-        import google.generativeai as genai
-        from google.api_core import exceptions as google_exceptions
-        
-        genai.configure(api_key=self.api_key)
-        
-        # 合并系统消息和提示词
-        full_prompt = f"{system_message}\n\n{prompt}"
-        
-        # 创建模型实例
-        model_instance = genai.GenerativeModel(self.model)
-        
-        # 注意：Gemini 3 的 thinkingConfig 在当前版本的 google-generativeai SDK 中
-        # 可能不支持通过 generation_config 传递，暂时移除以避免错误
-        # 如果需要优化成本，可以考虑升级到新版本的 SDK 或使用其他方式配置
-        response = model_instance.generate_content(full_prompt)
-        
-        if not response.text:
-            raise ValueError("Gemini API 返回空响应")
-        
-        return response.text
-    
-    def _handle_error(self, error: Exception) -> Exception:
-        import google.api_core.exceptions as google_exceptions
-        
-        error_msg = str(error)
-        error_type_name = type(error).__name__
-        
-        # 处理 RetryError
-        actual_error = error
-        if hasattr(error, '__cause__') and error.__cause__:
-            actual_error = error.__cause__
-        elif hasattr(error, 'exception') and error.exception:
-            actual_error = error.exception
-        
-        actual_error_msg = str(actual_error)
-        combined_msg = f"{error_msg} (内部错误: {actual_error_msg})" if actual_error_msg != error_msg else error_msg
-        
-        # 认证错误
-        if (isinstance(actual_error, google_exceptions.Unauthenticated) or
-            isinstance(error, google_exceptions.Unauthenticated) or
-            "401" in error_msg or "unauthorized" in error_msg.lower() or
-            "invalid" in error_msg.lower() or "API key" in error_msg or
-            "authentication" in error_msg.lower()):
-            return ValueError(f"API密钥无效或已过期。请检查您的Google Gemini API Key是否正确。错误详情: {combined_msg}")
-        
-        # 网络错误
-        is_retry_error = isinstance(error, google_exceptions.RetryError) or "RetryError" in error_type_name
-        is_network_error = (
-            isinstance(actual_error, (google_exceptions.ServiceUnavailable, google_exceptions.DeadlineExceeded)) or
-            isinstance(error, (google_exceptions.ServiceUnavailable, google_exceptions.DeadlineExceeded)) or
-            is_retry_error or
-            "503" in error_msg or "service unavailable" in error_msg.lower() or
-            "failed to connect" in error_msg.lower() or "connection" in error_msg.lower() or
-            "network" in error_msg.lower() or "timeout" in error_msg.lower() or
-            "unavailable" in error_msg.lower() or "unreachable" in error_msg.lower() or
-            "getsockopt" in error_msg.lower()
-        )
-        
-        if is_network_error:
-            return ConnectionError(f"网络连接失败。无法连接到Google Gemini服务，可能是网络问题、防火墙限制或服务暂时不可用。错误详情: {combined_msg}")
-        
-        # 配额错误
-        if (isinstance(actual_error, google_exceptions.ResourceExhausted) or
-            isinstance(error, google_exceptions.ResourceExhausted) or
-            "quota" in error_msg.lower() or "rate limit" in error_msg.lower() or
-            "配额" in error_msg or "quota exceeded" in error_msg.lower()):
-            suggestion = ""
-            if "gemini-2.5-pro" in self.model or "gemini-3-pro" in self.model:
-                suggestion = "\n提示: 该模型可能需要付费配额。建议尝试使用 gemini-3-flash-preview（有免费层级）或 gemini-2.5-flash。"
-            return ValueError(f"API调用频率超限或配额已用完。请稍后重试或检查您的API配额。{suggestion}错误详情: {combined_msg}")
-        
-        return ValueError(f"Google Gemini API调用失败: {combined_msg}")
-
-
-# ============================================================================
-# 豆包服务实现
-# ============================================================================
-
-class DoubaoService(OpenAICompatibleService):
-    """豆包AI服务（兼容OpenAI API）"""
-
-    def _get_default_model(self) -> str:
-        return "doubao-pro-128k"
-
-    def _get_base_url(self) -> Optional[str]:
-        return "https://ark.cn-beijing.volces.com/api/v3"
-
-
-# ============================================================================
-# DeepSeek 服务实现
-# ============================================================================
-
-class DeepSeekService(OpenAICompatibleService):
-    """DeepSeek AI服务（兼容OpenAI API）"""
-
-    def _get_default_model(self) -> str:
-        return "deepseek-chat"
-
-    def _get_base_url(self) -> Optional[str]:
-        return "https://api.deepseek.com/v1"
-
-
-# ============================================================================
-# 注册所有服务
-# ============================================================================
-
-register_ai_service("openai", OpenAIService)
-register_ai_service("anthropic", AnthropicService)
-register_ai_service("gemini", GeminiService)
-register_ai_service("doubao", DoubaoService)
-register_ai_service("deepseek", DeepSeekService)
+# 具体提供商实现见 ai_providers/ 包，由 get_ai_service() 延迟加载。
 
 
 # ============================================================================

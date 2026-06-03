@@ -1,0 +1,40 @@
+{
+  "2026-01-15": {
+    "date": "2026-01-15",
+    "projects": {
+      "demo/project-a": {
+        "code_changes": 0,
+        "commit_count": 2,
+        "project_name": "project-a",
+        "tasks": [
+          {
+            "additions": 0,
+            "branch": "main",
+            "commit_id": "a1b2c3d4",
+            "commit_url": "https://gitlab.example.com/demo/-/commit/a1b2c3d4e5f6789012345678901234567890ab",
+            "commits": 1,
+            "deletions": 0,
+            "gitlab_url": "https://gitlab.example.com/demo/project-a",
+            "hours": 3.81,
+            "task_name": "feat(auth): 增加登录校验",
+            "task_type": "功能开发"
+          },
+          {
+            "additions": 0,
+            "branch": "main",
+            "commit_id": "b2c3d4e5",
+            "commit_url": "https://gitlab.example.com/demo/-/commit/b2c3d4e5f6789012345678901234567890abcd",
+            "commits": 1,
+            "deletions": 0,
+            "gitlab_url": "https://gitlab.example.com/demo/project-a",
+            "hours": 4.19,
+            "task_name": "fix(ui): 修复按钮样式",
+            "task_type": "Bug修复"
+          }
+        ],
+        "total_hours": 8.0
+      }
+    },
+    "total_hours": 8.0
+  }
+}

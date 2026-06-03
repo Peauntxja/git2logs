@@ -61,53 +61,19 @@ def html_to_image_safari(html_file, output_file):
         return False
 
 def html_to_image_chrome_headless(html_file, output_file):
-    """使用 Chrome 无头模式截图（如果可用）"""
+    """使用统一 image_converter 引擎（Chrome headless → Playwright 回退）。"""
+    from image_converter import convert_html_to_image
+
     html_path = Path(html_file).absolute()
-    output_path = Path(output_file).absolute()
-    
-    # 检查 Chrome 是否在常见位置
-    chrome_paths = [
-        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-        '/Applications/Chromium.app/Contents/MacOS/Chromium',
-    ]
-    
-    chrome_path = None
-    for path in chrome_paths:
-        if os.path.exists(path):
-            chrome_path = path
-            break
-    
-    if not chrome_path:
+    if not html_path.exists():
+        print(f"错误: HTML 文件不存在: {html_file}")
         return False
-    
-    print(f"正在使用 Chrome 渲染 HTML: {html_path}")
-    
-    try:
-        # 使用 Chrome 的 headless 模式截图
-        cmd = [
-            chrome_path,
-            '--headless',
-            '--disable-gpu',
-            '--window-size=1600,2400',
-            '--screenshot=' + str(output_path),
-            f'file://{html_path}'
-        ]
-        
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        
-        if result.returncode == 0 and output_path.exists():
-            print(f"✓ 图片已生成: {output_path}")
-            return True
-        else:
-            print(f"错误: {result.stderr}")
-            return False
-            
-    except subprocess.TimeoutExpired:
-        print("错误: Chrome 截图超时")
-        return False
-    except Exception as e:
-        print(f"错误: {str(e)}")
-        return False
+
+    print(f"正在渲染 HTML: {html_path}")
+    ok = convert_html_to_image(html_file, output_file)
+    if ok:
+        print(f"✓ 图片已生成: {output_file}")
+    return ok
 
 def html_to_image_webkit2png(html_file, output_file):
     """使用 webkit2png（如果已安装）"""

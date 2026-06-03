@@ -17,11 +17,6 @@ import os
 from datetime import datetime
 import logging
 
-from config import AIConfig
-
-# 导入工具模块
-from utils.date_utils import parse_iso_date
-
 # 从拆分后的子模块 re-export，保持对外 API 兼容
 from gitlab_client import (
     create_gitlab_client,
@@ -68,96 +63,36 @@ logger = logging.getLogger(__name__)
 
 def analyze_with_ai(all_results, author_name, ai_config, since_date=None, until_date=None):
     """
-    收集提交数据并使用AI进行分析
+    收集提交数据并使用 AI 进行分析（委托 Git2LogsService，保持对外 API 不变）。
 
     Args:
         all_results: 按项目分组的提交字典
         author_name: 提交者姓名
-        ai_config: AI配置字典
-            - service: 'openai', 'anthropic', 'gemini', 'doubao' 或 'deepseek'
-            - api_key: API密钥
-            - model: 模型名称（可选）
+        ai_config: AI 配置字典（service / api_key / model / base_url 可选）
         since_date: 起始日期（可选）
         until_date: 结束日期（可选）
 
     Returns:
-        dict: AI分析结果
+        dict: AI 分析结果
     """
-    from datetime import datetime
+    from models import AIParams
+    from service import Git2LogsService
 
-    try:
-        from ai_analysis import analyze_with_ai as call_ai_service
-    except ImportError:
-        logger.error("无法导入 ai_analysis 模块")
-        raise
-
-    commits_data = {
-        'total_commits': 0,
-        'active_days': 0,
-        'projects': [],
-        'commit_messages': [],
-        'time_distribution': {},
-        'code_stats': {}
-    }
-
-    all_dates = set()
-    all_commit_messages = []
-    projects_set = set()
-
-    try:
-        code_stats = calculate_code_statistics(all_results, since_date, until_date)
-        commits_data['code_stats'] = code_stats
-    except Exception as e:
-        logger.warning(f"计算代码统计失败: {str(e)}")
-        commits_data['code_stats'] = {
-            'total_additions': 0,
-            'total_deletions': 0
-        }
-
-    for project_path, result in all_results.items():
-        projects_set.add(project_path)
-        commits = result['commits']
-        commits_data['total_commits'] += len(commits)
-
-        for commit in commits:
-            if commit.message:
-                all_commit_messages.append(commit.message[:200])
-
-            commit_date = commit.committed_date
-            if isinstance(commit_date, str):
-                date_obj = parse_iso_date(commit_date)
-            else:
-                date_obj = commit_date
-            date_str = date_obj.strftime('%Y-%m-%d')
-            all_dates.add(date_str)
-
-            month_key = date_obj.strftime('%Y-%m')
-            commits_data['time_distribution'][month_key] = commits_data['time_distribution'].get(month_key, 0) + 1
-
-    commits_data['active_days'] = len(all_dates)
-    commits_data['projects'] = list(projects_set)
-    commits_data['commit_messages'] = all_commit_messages[:50]
-
-    timeout = AIConfig.TIMEOUT
-    logger.info(f"正在调用AI服务进行分析（超时时间: {timeout}秒）...")
-    try:
-        analysis_result = call_ai_service(commits_data, ai_config, timeout=timeout)
-        logger.info("AI分析完成")
-        analysis_result['ai_service'] = ai_config.get('service', 'unknown')
-        analysis_result['ai_model'] = ai_config.get('model', 'unknown')
-        return analysis_result
-    except TimeoutError as e:
-        logger.error(f"AI分析超时: {str(e)}")
-        raise
-    except ValueError as e:
-        logger.error(f"AI分析失败（可能是API密钥问题）: {str(e)}")
-        raise
-    except ConnectionError as e:
-        logger.error(f"AI分析失败（网络连接问题）: {str(e)}")
-        raise
-    except Exception as e:
-        logger.error(f"AI分析失败: {str(e)}")
-        raise
+    ai_params = AIParams(
+        service=ai_config.get('service', 'openai'),
+        api_key=ai_config.get('api_key', ''),
+        model=ai_config.get('model'),
+        base_url=ai_config.get('base_url'),
+    )
+    result = Git2LogsService().analyze_ai(
+        all_results,
+        author_name,
+        ai_params,
+        since_date=since_date,
+        until_date=until_date,
+        log_callback=lambda msg, _level="info": logger.info(msg),
+    )
+    return result['analysis_result']
 
 
 def _resolve_output_path(output, report_type, branch=None):
@@ -178,6 +113,64 @@ def _resolve_output_path(output, report_type, branch=None):
         return output
 
     return f"{today}_{report_type}{branch_suffix}.md"
+
+
+def _cli_output_format(args) -> str:
+    """将 CLI 标志映射为 Git2LogsService 的 output_format。"""
+    if args.statistics:
+        return 'statistics'
+    if args.daily_report:
+        return 'daily_report'
+    if args.work_hours:
+        return 'work_hours'
+    return 'commits'
+
+
+def _cli_report_type_name(args) -> str:
+    """用于 _resolve_output_path 的文件名类型段。"""
+    if args.statistics:
+        return 'statistics'
+    if args.daily_report:
+        return 'daily_report'
+    if args.work_hours:
+        return 'work_hours'
+    return 'all_projects'
+
+
+def _run_scan_all_via_service(args, token: str) -> None:
+    """scan-all 模式：经 Git2LogsService 生成报告（输出路径与旧 CLI 一致）。"""
+    from models import ReportParams
+    from service import Git2LogsService
+
+    report_type = _cli_report_type_name(args)
+    output_file = _resolve_output_path(args.output, report_type, args.branch)
+
+    params = ReportParams(
+        gitlab_url=args.gitlab_url,
+        token=token,
+        author=args.author,
+        since_date=args.since,
+        until_date=args.until,
+        branch=args.branch,
+        output_format=_cli_output_format(args),
+        output_path=output_file,
+        scan_all=True,
+        repo_url=None,
+        daily_hours=args.daily_hours,
+    )
+
+    result = Git2LogsService().generate_report(params, log_callback=logger.info)
+    all_results = result.get('all_results') or {}
+    if not all_results:
+        logger.warning(f"未在任何项目中找到提交者 '{args.author}' 的提交记录")
+        sys.exit(0)
+
+    saved = result.get('output_file')
+    if saved:
+        logger.info(f"日志已保存到: {saved}")
+    for _ftype, path in (result.get('generated_files') or {}).items():
+        if path and path != saved:
+            logger.info(f"已生成: {path}")
 
 
 def main():
@@ -249,41 +242,8 @@ def main():
                 sys.exit(1)
 
             logger.info(f"使用自动扫描模式，GitLab 实例: {gitlab_url}")
-            gl = create_gitlab_client(gitlab_url, token)
-            all_results = scan_all_projects(
-                gl, args.author,
-                since_date=args.since, until_date=args.until, branch=args.branch
-            )
-
-            if not all_results:
-                logger.warning(f"未在任何项目中找到提交者 '{args.author}' 的提交记录")
-                sys.exit(0)
-
-            if args.statistics:
-                markdown_content = generate_statistics_report(
-                    all_results, args.author,
-                    since_date=args.since, until_date=args.until
-                )
-                output_file = _resolve_output_path(args.output, 'statistics', args.branch)
-            elif args.daily_report:
-                markdown_content = generate_daily_report(
-                    all_results, args.author,
-                    since_date=args.since, until_date=args.until, branch=args.branch
-                )
-                output_file = _resolve_output_path(args.output, 'daily_report', args.branch)
-            elif args.work_hours:
-                markdown_content = generate_work_hours_report(
-                    all_results, args.author,
-                    since_date=args.since, until_date=args.until,
-                    daily_hours=args.daily_hours, branch=args.branch
-                )
-                output_file = _resolve_output_path(args.output, 'work_hours', args.branch)
-            else:
-                markdown_content = generate_multi_project_markdown(
-                    all_results, args.author,
-                    since_date=args.since, until_date=args.until
-                )
-                output_file = _resolve_output_path(args.output, 'all_projects', args.branch)
+            _run_scan_all_via_service(args, token)
+            return
 
         else:
             extracted_url = extract_gitlab_url(args.repo)
@@ -323,9 +283,9 @@ def main():
             else:
                 output_file = _resolve_output_path(args.output, 'commits', args.branch)
 
-        with open(output_file, 'w', encoding='utf-8') as f:
-            f.write(markdown_content)
-        logger.info(f"日志已保存到: {output_file}")
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write(markdown_content)
+            logger.info(f"日志已保存到: {output_file}")
 
     except KeyboardInterrupt:
         logger.info("用户中断操作")

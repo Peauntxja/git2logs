@@ -20,6 +20,7 @@ venv.bak/
 
 # PyInstaller
 *.spec
+!MIZUKI-TOOLBOX.spec
 build/
 dist/
 *.app
@@ -96,8 +97,8 @@ $RECYCLE.BIN/
 test-document/
 logs/
 test/
-tests/
 *.test.md
+# tests/ 目录用于 golden 回归（阶段0+），不再忽略
 
 # 环境变量和配置
 .env
