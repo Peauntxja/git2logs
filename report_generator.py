@@ -567,7 +567,7 @@ def generate_all_reports(all_results, author_name, output_dir, since_date=None, 
             log("正在生成HTML格式...")
             # 尝试导入 generate_report_image 模块
             try:
-                from generate_report_image import parse_daily_report, generate_html_report
+                from report_html import parse_daily_report, generate_html_report
                 data = parse_daily_report(str(daily_file))
                 html_file = output_path / f"{date_prefix}_daily_report.html"
                 generate_html_report(data, str(html_file))
@@ -588,9 +588,9 @@ def generate_all_reports(all_results, author_name, output_dir, since_date=None, 
         try:
             log("正在生成PNG图片...")
             try:
-                from generate_report_image import html_to_image_chrome
+                from image_converter import convert_html_to_image
                 png_file = output_path / f"{date_prefix}_daily_report.png"
-                if html_to_image_chrome(str(html_file), str(png_file)):
+                if convert_html_to_image(str(html_file), str(png_file)):
                     generated_files['png'] = str(png_file)
                     log(f"✓ PNG图片已保存: {png_file}")
                 else:
