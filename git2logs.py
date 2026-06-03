@@ -137,6 +137,65 @@ def _cli_report_type_name(args) -> str:
     return 'all_projects'
 
 
+def _run_single_repo_legacy(args, token: str) -> None:
+    """
+    单仓库模式：经 fetch_commits 拉取数据，报告内容仍为 commits Markdown。
+
+    --daily-report 仅影响输出文件名（历史 CLI 行为，不切换日报正文格式）。
+    """
+    from models import ReportParams, GitLabConnectionError
+    from service import Git2LogsService
+
+    gitlab_url = args.gitlab_url
+    extracted_url = extract_gitlab_url(args.repo)
+    if extracted_url:
+        gitlab_url = extracted_url
+        logger.info(f"从仓库 URL 提取 GitLab 实例: {gitlab_url}")
+
+    params = ReportParams(
+        gitlab_url=gitlab_url,
+        token=token,
+        author=args.author,
+        since_date=args.since,
+        until_date=args.until,
+        branch=args.branch,
+        output_format='commits',
+        scan_all=False,
+        repo_url=args.repo,
+    )
+
+    try:
+        all_results = Git2LogsService().fetch_commits(
+            params,
+            log_callback=logger.info,
+            strict_single_project=True,
+        )
+    except GitLabConnectionError as exc:
+        logger.error(str(exc))
+        logger.error("请检查项目路径是否正确，以及是否有访问权限")
+        sys.exit(1)
+
+    if not all_results:
+        logger.warning(f"未找到提交者 '{args.author}' 的提交记录")
+        sys.exit(0)
+
+    project_data = next(iter(all_results.values()))
+    project = project_data['project']
+    grouped_commits = group_commits_by_date(project_data['commits'])
+    markdown_content = generate_markdown_log(
+        grouped_commits,
+        args.author,
+        repo_name=project.name,
+        project=project,
+    )
+
+    report_type = 'daily_report' if args.daily_report else 'commits'
+    output_file = _resolve_output_path(args.output, report_type, args.branch)
+    with open(output_file, 'w', encoding='utf-8') as f:
+        f.write(markdown_content)
+    logger.info(f"日志已保存到: {output_file}")
+
+
 def _run_scan_all_via_service(args, token: str) -> None:
     """scan-all 模式：经 Git2LogsService 生成报告（输出路径与旧 CLI 一致）。"""
     from models import ReportParams
@@ -246,46 +305,7 @@ def main():
             return
 
         else:
-            extracted_url = extract_gitlab_url(args.repo)
-            if extracted_url:
-                gitlab_url = extracted_url
-                logger.info(f"从仓库 URL 提取 GitLab 实例: {gitlab_url}")
-
-            gl = create_gitlab_client(gitlab_url, token)
-            project_id = parse_project_identifier(args.repo)
-            logger.info(f"项目标识符: {project_id}")
-
-            try:
-                project = gl.projects.get(project_id)
-                logger.info(f"成功获取项目: {project.name}")
-            except Exception as e:
-                logger.error(f"获取项目失败: {str(e)}")
-                logger.error("请检查项目路径是否正确，以及是否有访问权限")
-                sys.exit(1)
-
-            commits = get_commits_by_author(
-                project, args.author,
-                since_date=args.since, until_date=args.until, branch=args.branch
-            )
-
-            if not commits:
-                logger.warning(f"未找到提交者 '{args.author}' 的提交记录")
-                sys.exit(0)
-
-            grouped_commits = group_commits_by_date(commits)
-            markdown_content = generate_markdown_log(
-                grouped_commits, args.author,
-                repo_name=project.name, project=project
-            )
-
-            if args.daily_report:
-                output_file = _resolve_output_path(args.output, 'daily_report', args.branch)
-            else:
-                output_file = _resolve_output_path(args.output, 'commits', args.branch)
-
-            with open(output_file, 'w', encoding='utf-8') as f:
-                f.write(markdown_content)
-            logger.info(f"日志已保存到: {output_file}")
+            _run_single_repo_legacy(args, token)
 
     except KeyboardInterrupt:
         logger.info("用户中断操作")
