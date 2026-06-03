@@ -62,7 +62,13 @@ def get_ai_service(name: str):
 class BaseAIService(ABC):
     """AI服务基类，提供统一的接口和通用逻辑"""
     
-    def __init__(self, api_key: str, model: str = None, timeout: int = 120):
+    def __init__(
+        self,
+        api_key: str,
+        model: str = None,
+        timeout: int = 120,
+        base_url: str = None,
+    ):
         """
         初始化AI服务
         
@@ -70,10 +76,12 @@ class BaseAIService(ABC):
             api_key: API密钥
             model: 模型名称，如果为None则使用默认模型
             timeout: 超时时间（秒）
+            base_url: 可选，覆盖提供商默认 API 地址（OpenAI 兼容类生效）
         """
         self.api_key = api_key
         self.model = model or self._get_default_model()
         self.timeout = timeout
+        self.base_url_override = (base_url or "").strip() or None
     
     @abstractmethod
     def _get_default_model(self) -> str:
@@ -244,13 +252,15 @@ class OpenAICompatibleService(BaseAIService):
     - 其他兼容 OpenAI API 的服务
     """
 
-    def _get_base_url(self) -> Optional[str]:
-        """返回 API base_url（子类可重写）
-
-        Returns:
-            Optional[str]: base_url，如果为 None 则使用 OpenAI 默认值
-        """
+    def _get_provider_base_url(self) -> Optional[str]:
+        """返回提供商默认 base_url（子类可重写）。"""
         return None
+
+    def _get_base_url(self) -> Optional[str]:
+        """返回 API base_url：优先使用调用方传入的 base_url。"""
+        if self.base_url_override:
+            return self.base_url_override
+        return self._get_provider_base_url()
 
     def _get_json_mode_models(self) -> List[str]:
         """返回支持 JSON 模式的模型列表（子类可重写）
@@ -488,7 +498,12 @@ def analyze_with_ai(commits_data: Dict[str, Any], ai_config: Dict[str, Any], tim
     
     # 获取服务类并创建实例
     service_class = get_ai_service(service_name)
-    service = service_class(api_key=api_key, model=model, timeout=timeout)
+    service = service_class(
+        api_key=api_key,
+        model=model,
+        timeout=timeout,
+        base_url=ai_config.get('base_url'),
+    )
     
     # 调用统一接口
     return service.analyze(commits_data)
@@ -518,7 +533,12 @@ def analyze_report_file(report_content: str, ai_config: Dict[str, Any], timeout:
     
     # 获取服务类并创建实例
     service_class = get_ai_service(service_name)
-    service = service_class(api_key=api_key, model=model, timeout=timeout)
+    service = service_class(
+        api_key=api_key,
+        model=model,
+        timeout=timeout,
+        base_url=ai_config.get('base_url'),
+    )
     
     # 调用统一接口
     return service.analyze_report(report_content)

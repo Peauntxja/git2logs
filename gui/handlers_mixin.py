@@ -281,54 +281,17 @@ class HandlersMixin:
     def _update_ai_models(self, *args):
         """更新AI模型列表"""
         try:
+            from ai_providers.catalog import (
+                get_provider_default_model,
+                get_provider_models,
+            )
+
             service = self.ai_service.get()
-            if service == "openai":
-                # 更新模型列表，添加最新模型（根据 OpenAI API 文档）
-                models = [
-                    "gpt-4o",           # 最新最强模型
-                    "gpt-4o-mini",      # 推荐：性价比高
-                    "gpt-4-turbo",
-                    "gpt-4",
-                    "gpt-3.5-turbo"
-                ]
-                if self.ai_model.get() not in models:
-                    self.ai_model.set("gpt-4o-mini")  # 默认使用性价比高的模型
-            elif service == "anthropic":
-                models = ["claude-3-5-sonnet-20241022", "claude-3-opus-20240229", "claude-3-sonnet-20240229"]
-                if self.ai_model.get() not in models:
-                    self.ai_model.set("claude-3-5-sonnet-20241022")
-            elif service == "gemini":
-                # 更新模型列表，添加 Gemini 3 系列（推荐使用）
-                models = [
-                    "gemini-3-flash-preview",  # 推荐：有免费层级，速度快
-                    "gemini-3-pro-preview",    # 最强大，但需要配额
-                    "gemini-2.5-pro",
-                    "gemini-2.5-flash",
-                    "gemini-2.5-flash-lite",
-                    "gemini-2.5",
-                    "gemini-1.5-pro",
-                    "gemini-1.5-flash"
-                ]
-                if self.ai_model.get() not in models:
-                    self.ai_model.set("gemini-3-flash-preview")  # 默认使用 Gemini 3 Flash
-            elif service == "doubao":
-                # 豆包模型列表
-                models = [
-                    "doubao-pro-128k",      # 专业版
-                    "doubao-lite-128k"      # 轻量版
-                ]
-                if self.ai_model.get() not in models:
-                    self.ai_model.set("doubao-pro-128k")
-            elif service == "deepseek":
-                # DeepSeek 模型列表
-                models = [
-                    "deepseek-chat",        # 通用对话模型
-                    "deepseek-coder",       # 代码专用模型
-                    "deepseek-reasoner"     # 推理模型
-                ]
-                if self.ai_model.get() not in models:
-                    self.ai_model.set("deepseek-chat")
-            
+            models = get_provider_models(service)
+            default_model = get_provider_default_model(service)
+            if self.ai_model.get() not in models:
+                self.ai_model.set(default_model)
+
             self.ai_model_combo.configure(values=models)
         except Exception:
             logger.debug("更新AI模型下拉列表失败")
@@ -761,7 +724,7 @@ class HandlersMixin:
 
         except ImportError as e:
             self.log(f"AI分析功能不可用: {str(e)}", "error")
-            self.log("提示: 请运行 'pip install openai anthropic google-generativeai' 安装AI服务库", "warning")
+            self.log("提示: 请运行 'pip install openai anthropic google-genai' 安装AI服务库", "warning")
             self._show_toast("AI 分析失败", "error")
             self.root.after(0, lambda: messagebox.showerror("错误", f"AI分析功能不可用: {str(e)}"))
         except TimeoutError as e:
