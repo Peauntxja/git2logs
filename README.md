@@ -86,7 +86,7 @@ python3 generate_report_image.py tests/expected/daily_report.md
 python3 image_converter.py report.html report.png
 ```
 
-实现：`report_html` → `image_converter`（Chrome headless，Playwright 回退）。`html_to_image.py` / `html_to_image_macos.py` 为兼容保留的薄入口，勿再扩展。
+实现：`report_html` → `image_converter`（Chrome headless，Playwright 回退）。
 
 ## 项目结构（核心）
 
