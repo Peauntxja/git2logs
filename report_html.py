@@ -323,8 +323,26 @@ def parse_daily_report(file_path):
         'timeline': timeline_data
     }
 
+def _normalize_html_data(data: dict) -> dict:
+    """将 parse_daily_report 结果补齐为 generate_html_report 所需字段。"""
+    out = dict(data)
+    date = out.get('date', '')
+    out.setdefault('title', f"{date} - MIZUKI 开发日报" if date else 'MIZUKI 开发日报')
+    out['total_commits'] = out.get('commits_count', out.get('total_commits', 0))
+    out.setdefault('active_days', 1)
+    for key in ('code_additions', 'code_deletions', 'code_net'):
+        out.setdefault(key, '—')
+    out.setdefault('projects_count', 0)
+    out.setdefault('feat_count', 0)
+    out.setdefault('bug_count', 0)
+    out.setdefault('projects', [])
+    out.setdefault('timeline', [])
+    return out
+
+
 def generate_html_report(data, output_file):
     """生成HTML格式的日报表格"""
+    data = _normalize_html_data(data)
     # 使用列表累积 HTML 片段，最后一次性 join，避免字符串重复拼接
     html_parts = [f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -618,15 +636,16 @@ def generate_html_report(data, output_file):
                 <div class="timeline">
 """)
 
-    # 添加时间线条目（使用列表推导式）
+    # 添加时间线条目（按时间升序展示）
+    timeline_sorted = sorted(data.get('timeline') or [], key=lambda item: item.get('time', ''))
     html_parts.extend([
         f"""                    <div class="timeline-item">
                         <span class="time">{item['time']}</span>
-                        <span class="type">{'✨' if item['type'] == '✨' else '🐛'}</span>
+                        <span class="type">{item.get('type', '📝')}</span>
                         <span>{item['project']}</span>
                     </div>
 """
-        for item in data['timeline']
+        for item in timeline_sorted
     ])
 
     html_parts.append("""

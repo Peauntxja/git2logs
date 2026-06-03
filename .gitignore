@@ -1,3 +1,7 @@
+# 测试目录内本地生成的 HTML/PNG（generate_report_image 冒烟）
+tests/expected/*.html
+tests/expected/*.png
+
 # Python
 __pycache__/
 *.py[cod]

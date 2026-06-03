@@ -1,0 +1,29 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  unittest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Syntax check (changed Python files)
+        run: |
+          python3 -m py_compile git2logs.py cli.py service.py report_html.py
+          python3 -m py_compile gui/app.py gui/entry.py
+
+      - name: Golden and unit tests
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
