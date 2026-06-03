@@ -1,5 +1,5 @@
 {
-  "date": "2025年12月12日",
+  "date": "2026年1月15日",
   "projects_count": 1,
   "commits_count": 2,
   "work_time": "10:30 - 16:45",
@@ -12,5 +12,16 @@
       "commits": 2
     }
   ],
-  "timeline": []
+  "timeline": [
+    {
+      "time": "16:45",
+      "type": "🐛",
+      "project": "Demo Project"
+    },
+    {
+      "time": "10:30",
+      "type": "✨",
+      "project": "Demo Project"
+    }
+  ]
 }
