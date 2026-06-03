@@ -1,6 +1,9 @@
-# 测试目录内本地生成的 HTML/PNG（generate_report_image 冒烟）
+# 测试：本地缓存与临时产物（golden 基准仍提交在 tests/expected/）
+tests/**/__pycache__/
+tests/fixtures/_test_export_output.xlsx
 tests/expected/*.html
 tests/expected/*.png
+.cursor/
 
 # Python
 __pycache__/
