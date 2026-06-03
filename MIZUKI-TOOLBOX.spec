@@ -9,6 +9,7 @@ _target_arch = "arm64" if sys.platform == "darwin" else None
 
 _project_modules = [
     'git2logs.py',
+    'cli.py',
     'config.py',
     'models.py',
     'gitlab_client.py',
@@ -52,6 +53,7 @@ hiddenimports = [
     'service',
     'image_converter',
     'report_html',
+    'cli',
     'gui',
     'gui.styles',
     'gui.service_bridge',

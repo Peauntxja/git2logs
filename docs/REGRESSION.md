@@ -17,6 +17,7 @@ python3 -m unittest discover -s tests -p 'test_*.py' -v
 - 统计报告 / 开发日报 / 工时报告 / commits Markdown（固定 fixture，无 GitLab 网络）
 - `calculate_work_hours` 数据结构
 - Excel `merge_and_normalize_tasks` 与 `fill_excel_template` 行数
+- `report_html.parse_daily_report` 结构化字段（`tests/expected/report_html_parsed.json`）
 
 ## 打包体积基线
 

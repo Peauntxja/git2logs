@@ -1,0 +1,16 @@
+{
+  "date": "2025年12月12日",
+  "projects_count": 1,
+  "commits_count": 2,
+  "work_time": "10:30 - 16:45",
+  "feat_count": 1,
+  "bug_count": 1,
+  "projects": [
+    {
+      "name": "Demo Project",
+      "path": "demo/project-a",
+      "commits": 2
+    }
+  ],
+  "timeline": []
+}
