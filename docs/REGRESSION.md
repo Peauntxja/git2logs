@@ -40,11 +40,14 @@ python3 scripts/audit_bundle.py
 
 ## CLI 手工清单
 
+`scan-all` 与单仓库模式均经 `Git2LogsService` 拉取提交；单仓库 `--daily-report` 仍只改输出文件名、正文为 commits Markdown（历史行为）。
+
 ```bash
 export GITLAB_TOKEN="..."
 python3 git2logs.py --scan-all --gitlab-url <url> --author <name> --since 2026-01-15 --until 2026-01-15 --daily-report -o /tmp/out.md
 python3 git2logs.py ... --statistics -o /tmp/stats.md
 python3 git2logs.py ... --work-hours -o /tmp/wh.md
+python3 git2logs.py --repo <url> --author <name> --token ... -o /tmp/commits.md
 ```
 
 ## macOS 打包应用

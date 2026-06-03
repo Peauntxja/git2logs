@@ -102,19 +102,7 @@ class Git2LogsService:
         """
         self._log(log_callback, "开始生成日志...", "info")
 
-        clear_commit_cache()
-
-        # 1. 连接 GitLab
-        self._log(log_callback, f"正在连接到 GitLab: {params.gitlab_url}", "info")
-        try:
-            gl = create_gitlab_client(params.gitlab_url, params.token)
-        except Exception as exc:
-            raise GitLabConnectionError(f"连接 GitLab 失败: {exc}") from exc
-
-        # 2. 获取提交记录
-        all_results = self._fetch_commits(
-            gl, params, log_callback,
-        )
+        all_results = self.fetch_commits(params, log_callback=log_callback)
 
         if not all_results:
             self._log(log_callback, "未找到任何提交记录", "warning")
@@ -140,7 +128,34 @@ class Git2LogsService:
     # 提交获取（scan_all / 单项目）
     # ------------------------------------------------------------------
 
-    def _fetch_commits(self, gl, params: ReportParams, log_callback=None):
+    def fetch_commits(
+        self,
+        params: ReportParams,
+        log_callback=None,
+        *,
+        strict_single_project: bool = False,
+    ) -> dict:
+        """
+        连接 GitLab 并拉取提交（不生成报告文件）。
+
+        strict_single_project=True 时，单项目获取失败会抛出 GitLabConnectionError
+        （供 CLI 保持与旧版相同的非零退出语义）。
+        """
+        clear_commit_cache()
+        self._log(log_callback, f"正在连接到 GitLab: {params.gitlab_url}", "info")
+        try:
+            gl = create_gitlab_client(params.gitlab_url, params.token)
+        except Exception as exc:
+            raise GitLabConnectionError(f"连接 GitLab 失败: {exc}") from exc
+
+        return self._fetch_commits(
+            gl,
+            params,
+            log_callback,
+            strict_single_project=strict_single_project,
+        )
+
+    def _fetch_commits(self, gl, params: ReportParams, log_callback=None, *, strict_single_project: bool = False):
         """根据 params 中的模式获取提交记录，返回 all_results 字典。"""
         all_results = {}
 
@@ -160,11 +175,12 @@ class Git2LogsService:
         else:
             all_results = self._fetch_single_project(
                 gl, params, log_callback,
+                strict=strict_single_project,
             )
 
         return all_results
 
-    def _fetch_single_project(self, gl, params: ReportParams, log_callback=None):
+    def _fetch_single_project(self, gl, params: ReportParams, log_callback=None, *, strict: bool = False):
         """单项目模式：解析 URL → 获取项目 → 获取提交。"""
         all_results = {}
         repo_url = params.repo_url
@@ -193,6 +209,8 @@ class Git2LogsService:
                 self._log(log_callback, f"找到 {len(commits)} 条提交记录", "success")
         except Exception as exc:
             self._log(log_callback, f"获取项目失败: {exc}", "error")
+            if strict:
+                raise GitLabConnectionError(f"获取项目失败: {exc}") from exc
 
         return all_results
 
