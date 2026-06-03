@@ -2,15 +2,27 @@
 
 在改动报告生成、工时算法、Excel 导出、打包脚本或 GUI 业务编排后，按本清单验证。**行为须与改前一致**。
 
-## 自动化（阶段 0）
+## 测试目录说明
+
+| 路径 | 作用 | 是否提交 |
+|------|------|----------|
+| `tests/expected/` | 报告/HTML 解析 golden 基准 | ✅ 需提交 |
+| `tests/fixtures/` | Excel 模板等固定输入 | ✅ 需提交 |
+| `tests/helpers/` | 假 GitLab 数据与文本归一化 | ✅ 需提交 |
+| `tests/test_regression.py` | 主回归（报告、HTML、CLI、Service） | ✅ |
+| `tests/test_ai_providers.py` | AI 注册表（隔离全局状态） | ✅ |
+| `tests/**/__pycache__/`、临时 xlsx/html/png | 本地运行产物 | ❌ gitignore |
+
+**不要删除** `tests/expected/` 以“保持干净”——那是无网络的回归安全网。
+
+## 自动化
 
 推送至 `main` 时 GitHub Actions（`.github/workflows/test.yml`）会运行与本地相同的 unittest。
 
 ```bash
-# 首次或算法变更后，刷新 golden 基准（需 openpyxl）
-python3 scripts/update_golden_fixtures.py
-
-# 运行 golden 与 AI 注册表测试
+bash scripts/run_tests.sh
+# 或
+python3 scripts/update_golden_fixtures.py   # 仅算法/版式有意变更后
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
