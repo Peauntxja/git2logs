@@ -1,0 +1,20 @@
+---
+description: Git 提交禁止 Cursor 共著，保持 Contributors 仅本人
+alwaysApply: true
+---
+
+# Git 提交：禁止额外 Contributors
+
+GitHub Contributors 来自提交作者与 `Co-authored-by`  trailer。Cursor 默认会追加 `Co-authored-by: Cursor <cursoragent@cursor.com>`，必须避免。
+
+## 提交时必须遵守
+
+- **禁止**在 commit message 中加入任何 `Co-authored-by:` 行（尤其 Cursor）
+- 使用 HEREDOC 写提交信息，内容仅含 type/scope 与描述，不含共著行
+- 提交前确认 `.githooks` 已启用：`npm run setup:hooks`（或 `git config core.hooksPath .githooks`）
+- 若发现历史提交含 Cursor 共著，用 `npm run fix:contributors` 清理后 force push
+
+## 作者身份
+
+- 仅使用仓库维护者本人身份提交（当前：`MIZUKI <zed@linux.do>`）
+- 不要替换成 bot、CI 或其他邮箱
