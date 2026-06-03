@@ -54,6 +54,13 @@ hiddenimports = [
     'gui.styles',
     'gui.service_bridge',
     'gui.app',
+    'gui.layout_mixin',
+    'gui.handlers_mixin',
+    'gui.tabs.gitlab_tab',
+    'gui.tabs.date_output_tab',
+    'gui.tabs.ai_tab',
+    'gui.tabs.excel_tab',
+    'gui.tabs.actions_tab',
     'utils.date_utils',
 ]
 
