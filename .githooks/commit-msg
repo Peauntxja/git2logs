@@ -1,0 +1,6 @@
+#!/bin/sh
+# 移除 Cursor 共著标记，避免 GitHub Contributors 出现额外贡献者
+tmp=$(mktemp)
+grep -v '^Co-authored-by: Cursor <cursoragent@cursor.com>$' "$1" > "$tmp"
+mv "$tmp" "$1"
+exit 0
