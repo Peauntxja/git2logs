@@ -2,6 +2,15 @@
 
 本文档说明如何将 GitLab 提交日志生成工具打包成可执行文件。
 
+## 回归与体积基线
+
+- 自动化 golden 测试与手工清单：见 [docs/REGRESSION.md](docs/REGRESSION.md)
+- 打包后记录 `_internal` 体积：`bash scripts/measure_bundle.sh`（写入 `build/metrics.json`）
+
+## 统一 PyInstaller 配置
+
+macOS 与 Windows 共用 [`MIZUKI-TOOLBOX.spec`](MIZUKI-TOOLBOX.spec)，由 `build_macos.sh` / `build_windows.bat` 调用。打包后执行与 macOS 相同的 `_internal` 清理（删除 grpc、numpy、PIL 等未使用依赖）。
+
 ## 前置要求
 
 ### macOS
