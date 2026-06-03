@@ -23,8 +23,17 @@ def parse_daily_report(file_path):
     
     if is_daily_report:
         # 解析日报格式
-        date_match = re.search(r'\*\*日期\*\*: (.*?) \(', content)
-        date = date_match.group(1) if date_match else '2025年12月12日'
+        date_match = re.search(r'\*\*日期\*\*: (.*?)(?:\s*\(|$)', content, re.M)
+        raw_date = date_match.group(1).strip() if date_match else ''
+        if not raw_date or raw_date == '<NORMALIZED>':
+            stat_date = re.search(r'\*\*统计日期\*\*: (\d{4})-(\d{2})-(\d{2})', content)
+            if stat_date:
+                y, m, d = stat_date.groups()
+                date = f"{y}年{int(m)}月{int(d)}日"
+            else:
+                date = '2025年12月12日'
+        else:
+            date = raw_date
         
         projects_match = re.search(r'\*\*涉及项目\*\*: (\d+) 个', content)
         projects_count = int(projects_match.group(1)) if projects_match else 0
@@ -60,15 +69,26 @@ def parse_daily_report(file_path):
                 'commits': int(match[2])
             })
         
-        # 提取时间线
+        # 提取时间线（旧版 bullet 或新版「提交记录」列表）
         timeline_matches = re.findall(r'- \*\*(\d{2}:\d{2})\*\* (.) \[([^\]]+)\]', content)
         timeline_data = []
         for match in timeline_matches:
             timeline_data.append({
                 'time': match[0],
                 'type': match[1],
-                'project': match[2]
+                'project': match[2],
             })
+        default_project = projects_data[0]['name'] if projects_data else ''
+        if not timeline_data:
+            for emoji, time in re.findall(
+                r'\d+\. \*\*(.)\s*\[[^\]]+\]\*\* \[[a-f0-9]+\][^\n]*\n\s+- 时间: \d{4}-\d{2}-\d{2} (\d{2}:\d{2})',
+                content,
+            ):
+                timeline_data.append({
+                    'time': time,
+                    'type': emoji,
+                    'project': default_project,
+                })
     elif is_all_projects:
         # 解析所有项目汇总日志格式
         # 提取生成时间
