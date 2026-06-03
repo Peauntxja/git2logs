@@ -19,8 +19,9 @@
 - macOS 打包脚本：`build_macos.sh`，产物为 `dist/MIZUKI-TOOLBOX.app` 和 `.dmg`
 - 打包目标架构：arm64（Apple Silicon）
 - GUI 入口文件：`git2logs_gui_ctk.py`
-- 核心模块拆分：config.py、models.py、gitlab_client.py、commit_analysis.py、work_hours.py、report_generator.py、service.py、image_converter.py
-- 远程仓库托管在 GitHub
-- AI 分析支持 OpenAI、Anthropic、Google Gemini 三个提供商
+- 核心模块：config、models、gitlab_client、commit_analysis、work_hours、report_generator、service、cli、report_html、image_converter；GUI 在 `gui/` 包
+- 远程仓库托管在 GitHub；`main` 分支有 GitHub Actions unittest（`.github/workflows/test.yml`）
+- AI：`ai_providers/` + `ai_analysis.py` 延迟加载（OpenAI、Anthropic、Gemini、豆包、DeepSeek）
+- 本地回归：`bash scripts/run_tests.sh` 或 `python3 -m unittest discover -s tests -p 'test_*.py' -v`
 - Excel 导出依赖 openpyxl，HTML 转图片依赖 Chrome headless 或 Playwright
 - `build_windows.bat` 为 Windows 打包脚本，入口已更新为 `git2logs_gui_ctk.py`
