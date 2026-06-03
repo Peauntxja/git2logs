@@ -29,6 +29,7 @@ from report_generator import (
 )
 from work_hours import calculate_work_hours
 from excel_exporter import merge_and_normalize_tasks
+from report_html import parse_daily_report
 
 EXPECTED = ROOT / "tests" / "expected"
 AUTHOR = "MIZUKI"
@@ -90,6 +91,12 @@ def main() -> int:
             since_date=SINCE, until_date=UNTIL, branch="main",
         )
     _write("daily_report.md", normalize_report_text(daily))
+
+    parsed = parse_daily_report(str(EXPECTED / "daily_report.md"))
+    _write(
+        "report_html_parsed.json",
+        json.dumps(parsed, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+    )
 
     work_md = generate_work_hours_report(
         all_results, AUTHOR,
