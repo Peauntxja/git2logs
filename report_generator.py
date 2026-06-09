@@ -11,6 +11,7 @@
 """
 
 import os
+import re
 import logging
 from datetime import datetime
 from collections import defaultdict
@@ -28,6 +29,7 @@ from config import ReportConfig
 from commit_analysis import (
     analyze_commit_type, get_commit_details,
     calculate_code_statistics, get_commit_display_info,
+    is_merge_commit,
 )
 from work_hours import calculate_work_hours, format_work_hours_table
 
@@ -755,6 +757,64 @@ def generate_ai_analysis_report(analysis_result, author_name, since_date=None, u
     return ''.join(lines)
 
 
+def _normalize_report_date(date_val):
+    """归一化报告日期参数（去除首尾空白）。"""
+    if date_val is None:
+        return None
+    if isinstance(date_val, str):
+        stripped = date_val.strip()
+        return stripped or None
+    return date_val
+
+
+def _build_daily_theme_summary(project_commits):
+    """按项目生成一句主题摘要（规则驱动，无 AI）。"""
+    theme_lines = []
+    for project_path in sorted(project_commits.keys()):
+        info = project_commits[project_path]
+        name = info['project'].name
+        commits = info['commits']
+        if not commits:
+            continue
+        type_counts = defaultdict(int)
+        scopes = []
+        for item in commits:
+            type_counts[item['type']] += 1
+            first_line = (item['commit'].message or '').split('\n')[0]
+            scope_match = re.match(r'^\w+\(([^)]+)\):', first_line, re.I)
+            if scope_match:
+                scopes.append(scope_match.group(1))
+        main_type = max(type_counts.items(), key=lambda x: x[1])[0]
+        unique_scopes = list(dict.fromkeys(scopes))[:3]
+        scope_hint = f"，涉及 {'、'.join(unique_scopes)} 等模块" if unique_scopes else ""
+        theme_lines.append(
+            f"**{name}**：以{main_type}为主（{len(commits)} 次提交）{scope_hint}"
+        )
+    return theme_lines
+
+
+def _format_commit_body_excerpt(full_message, commit_type, max_lines=3):
+    """仅对功能/修复/性能类提交输出有限行 body 摘要。"""
+    body_types = {'功能开发', 'Bug修复', '性能优化'}
+    if commit_type not in body_types or not full_message or '\n' not in full_message:
+        return None
+    filtered_lines = [
+        line for line in full_message.split('\n')
+        if not line.strip().lower().startswith('made-with:')
+    ]
+    filtered_message = '\n'.join(filtered_lines).strip()
+    if not filtered_message or '\n' not in filtered_message:
+        return None
+    parts = [line for line in filtered_message.split('\n') if line.strip()]
+    body_lines = parts[1:1 + max_lines]
+    if not body_lines:
+        return None
+    if len(parts) > 1 + max_lines:
+        body_lines = body_lines[:]
+        body_lines[-1] = body_lines[-1].rstrip() + ' …'
+    return '\n   '.join(body_lines)
+
+
 def generate_daily_report(all_results, author_name, since_date=None, until_date=None, branch=None):
     """
     生成开发日报格式的 Markdown 文档
@@ -770,6 +830,9 @@ def generate_daily_report(all_results, author_name, since_date=None, until_date=
         str: Markdown 格式的日报内容
     """
     lines = []
+    since_date = _normalize_report_date(since_date)
+    until_date = _normalize_report_date(until_date)
+    merge_skipped = 0
 
     # 确定日期显示
     if since_date and until_date:
@@ -815,6 +878,10 @@ def generate_daily_report(all_results, author_name, since_date=None, until_date=
         }
         
         for commit in commits:
+            if is_merge_commit(commit.message):
+                merge_skipped += 1
+                continue
+
             commit_type, emoji = analyze_commit_type(commit.message)
             commit_types[commit_type] += 1
             commits_by_type[commit_type].append({
@@ -874,7 +941,7 @@ def generate_daily_report(all_results, author_name, since_date=None, until_date=
         lines.append(f"### {project.name} ({project_path})\n")
         # 链接与条数合并为一行；类型以每条提交前缀为准，避免重复统计
         lines.append(
-            f"**项目链接**: [{project.web_url}]({project.web_url}) · {len(commits)} 次\n\n"
+            f"**项目链接**: [{project.name}]({project.web_url}) · {len(commits)} 次\n\n"
         )
         lines.append("**提交记录**:\n\n")
         
@@ -900,22 +967,14 @@ def generate_daily_report(all_results, author_name, since_date=None, until_date=
                 changed_files = []
             
             commit_id = commit.id[:8]
-            commit_url = getattr(commit, 'web_url', '')
-            
-            lines.append(f"{idx}. **{emoji} [{commit_type}]** [{commit_id}]({commit_url}) {short_message}\n")
+
+            lines.append(f"{idx}. **{emoji} [{commit_type}]** `{commit_id}` {short_message}\n")
             lines.append(f"   - 时间: {time_str}\n")
             
-            # 显示完整的commit message（如果有多行）
-            if full_message and '\n' in full_message:
-                # 过滤 IDE 自动追加的元数据行（如 Made-with: Cursor）
-                filtered_lines = [
-                    l for l in full_message.split('\n')
-                    if not l.strip().lower().startswith('made-with:')
-                ]
-                filtered_message = '\n'.join(filtered_lines).strip()
-                if filtered_message and '\n' in filtered_message:
-                    indented_message = '\n   '.join(filtered_message.split('\n'))
-                    lines.append(f"   - 完整提交信息:\n   ```\n   {indented_message}\n   ```\n")
+            # 显示提交说明摘要（仅 feat/fix/perf，最多 3 行）
+            body_excerpt = _format_commit_body_excerpt(full_message, commit_type)
+            if body_excerpt:
+                lines.append(f"   - 提交说明:\n   ```\n   {body_excerpt}\n   ```\n")
             
             # 显示代码行数统计
             if stats:
@@ -998,11 +1057,20 @@ def generate_daily_report(all_results, author_name, since_date=None, until_date=
     else:
         summary_text = "本期"
 
-    lines.append(f"{summary_text}共完成 {total_commits} 次提交，涉及 {total_projects} 个项目。")
-    
+    summary_line = f"{summary_text}共完成 {total_commits} 次提交，涉及 {total_projects} 个项目。"
+    if merge_skipped:
+        summary_line += f"（已排除 {merge_skipped} 条分支同步提交）"
+    lines.append(summary_line + "\n")
+
     if commit_types:
         main_work = max(commit_types.items(), key=lambda x: x[1])
         lines.append(f"主要工作类型为 **{main_work[0]}**（{main_work[1]} 次）。")
+
+    theme_lines = _build_daily_theme_summary(project_commits)
+    if theme_lines:
+        lines.append("\n")
+        for theme in theme_lines:
+            lines.append(f"- {theme}\n")
     
     lines.append("\n")
     lines.append("\n---\n\n")
@@ -1016,6 +1084,8 @@ def generate_daily_report(all_results, author_name, since_date=None, until_date=
             lines.append(f"- **总新增行数**: {code_stats['total_additions']:,}\n")
             lines.append(f"- **总删除行数**: {code_stats['total_deletions']:,}\n")
             lines.append(f"- **净增行数**: {code_stats['net_lines']:,}\n")
+            if code_stats['net_lines'] < 0:
+                lines.append("- **说明**: 净删行以样式统一或删冗余为主，不代表工作量减少\n")
             lines.append(f"- **平均每次提交代码行数**: {code_stats['avg_lines_per_commit']}\n")
         else:
             lines.append("- **代码行数统计**: 暂不可用（需要API权限）\n")

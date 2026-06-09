@@ -25,6 +25,18 @@ def clear_commit_cache():
     _commit_stats_cache.clear()
 
 
+def is_merge_commit(commit_message):
+    """判断是否为 Merge / 分支同步类提交（不计入日报有效工作量）。"""
+    msg = (commit_message or '').strip().lower()
+    if not msg:
+        return False
+    if msg.startswith('merge '):
+        return True
+    if msg.startswith('merge pull request') or msg.startswith('merge remote-tracking'):
+        return True
+    return 'merge branch' in msg
+
+
 def analyze_commit_type(commit_message):
     """
     分析提交类型
@@ -50,6 +62,8 @@ def analyze_commit_type(commit_message):
         return ('文档更新', '📝')
     elif message_lower.startswith('style') or message_lower.startswith('样式'):
         return ('样式调整', '💄')
+    elif message_lower.startswith('perf') or message_lower.startswith('性能'):
+        return ('性能优化', '⚡')
     elif message_lower.startswith('test') or message_lower.startswith('测试'):
         return ('测试相关', '✅')
     # 然后检查关键词
@@ -294,6 +308,9 @@ def calculate_code_statistics(all_results, since_date=None, until_date=None):
         commits = result['commits']
         
         for commit in commits:
+            if is_merge_commit(commit.message):
+                continue
+
             total_commits += 1
             
             # 尝试从缓存获取

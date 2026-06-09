@@ -13,7 +13,7 @@ from datetime import datetime
 from collections import defaultdict
 
 from config import ReportConfig
-from commit_analysis import analyze_commit_type
+from commit_analysis import analyze_commit_type, is_merge_commit
 
 
 def _parse_iso_date(date_string: str) -> datetime:
@@ -34,6 +34,7 @@ def _get_task_difficulty_multiplier(task_type: str, task_name: str) -> float:
         "代码重构": 1.7,
         "代码维护": 1.0,
         "样式调整": 0.7,
+        "性能优化": 1.4,
         "测试相关": 1.1,
         "文档更新": 0.6,
         "其他": 1.0,
@@ -199,6 +200,10 @@ def calculate_work_hours(all_results, since_date=None, until_date=None,
             commit = commit_info['commit']
             project_obj = commit_info.get('project_obj')
 
+            commit_message = (commit.message or "").strip()
+            if is_merge_commit(commit_message):
+                continue
+
             # 获取代码变更量 - 尝试多种方式获取
             code_changes = 0
             additions = 0
@@ -277,7 +282,6 @@ def calculate_work_hours(all_results, since_date=None, until_date=None,
                 commit_branch = '多分支'
 
             # 识别提交类型和任务名称（用于难易度规则）
-            commit_message = (commit.message or "").strip()
             first_line = commit_message.split('\n')[0] if commit_message else ""
             task_type, _ = analyze_commit_type(commit_message)
             task_name = first_line
@@ -416,7 +420,7 @@ def format_work_hours_table(date_data):
     lines.append(f"**实际分配**: {actual_hours:.1f} 小时\n\n")
 
     # 生成表格
-    lines.append("| 项目名称 | 任务名称 | 任务类型 | 工时(h) | Commit ID | 分支 | GitLab地址 |\n")
+    lines.append("| 项目名称 | 任务名称 | 任务类型 | 工时(h) | Commit ID | 分支 | 项目地址 |\n")
     lines.append("|---------|---------|---------|--------|-----------|------|----------|\n")
 
     for project_path, project_data in date_data['projects'].items():
@@ -432,15 +436,12 @@ def format_work_hours_table(date_data):
             if len(branch_name) > 20:
                 branch_name = branch_name[:17] + '...'
 
-            # GitLab地址 - 直接显示URL
-            commit_url = task.get('commit_url', '')
+            # 项目地址 - 每个项目首行显示项目主页，后续行留空
             gitlab_url = task.get('gitlab_url', '')
-            if commit_url:
-                display_url = commit_url
-            elif gitlab_url:
-                display_url = gitlab_url
+            if first_task:
+                display_url = gitlab_url or 'N/A'
             else:
-                display_url = 'N/A'
+                display_url = ''
 
             if first_task:
                 lines.append(f"| **{project_name}** ({project_hours:.1f}h) | {task['task_name']} | {task['task_type']} | {task['hours']:.2f} | {commit_id} | {branch_name} | {display_url} |\n")

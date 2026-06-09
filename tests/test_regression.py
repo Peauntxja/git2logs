@@ -216,5 +216,24 @@ class FetchCommitsTests(unittest.TestCase):
             )
 
 
+class CommitAnalysisTests(unittest.TestCase):
+    def test_is_merge_commit(self):
+        from commit_analysis import is_merge_commit
+
+        self.assertTrue(is_merge_commit("Merge branch 'test' of http://gitlab.example.com/a into test"))
+        self.assertTrue(is_merge_commit("merge pull request !123 from feature/foo"))
+        self.assertFalse(is_merge_commit("feat(auth): 增加登录校验"))
+
+    def test_analyze_commit_type_perf(self):
+        from commit_analysis import analyze_commit_type
+
+        self.assertEqual(analyze_commit_type("perf(views): 优化委员会组织树加载体验"), ("性能优化", "⚡"))
+
+    def test_format_date_chinese_strips_whitespace(self):
+        from utils.date_utils import format_date_chinese
+
+        self.assertEqual(format_date_chinese(" 2026-06-08 "), "2026年06月08日")
+
+
 if __name__ == "__main__":
     unittest.main()
