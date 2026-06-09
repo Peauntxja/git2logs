@@ -1,27 +1,27 @@
 {
-  "date": "2026年1月15日",
-  "projects_count": 1,
-  "commits_count": 2,
-  "work_time": "10:30 - 16:45",
-  "feat_count": 1,
   "bug_count": 1,
+  "commits_count": 2,
+  "date": "2026年1月15日",
+  "feat_count": 1,
   "projects": [
     {
+      "commits": 2,
       "name": "Demo Project",
-      "path": "demo/project-a",
-      "commits": 2
+      "path": "demo/project-a"
     }
   ],
+  "projects_count": 1,
   "timeline": [
     {
+      "project": "Demo Project",
       "time": "16:45",
-      "type": "🐛",
-      "project": "Demo Project"
+      "type": "🐛"
     },
     {
+      "project": "Demo Project",
       "time": "10:30",
-      "type": "✨",
-      "project": "Demo Project"
+      "type": "✨"
     }
-  ]
+  ],
+  "work_time": "10:30 - 16:45"
 }

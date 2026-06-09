@@ -81,7 +81,7 @@ def parse_daily_report(file_path):
         default_project = projects_data[0]['name'] if projects_data else ''
         if not timeline_data:
             for emoji, time in re.findall(
-                r'\d+\. \*\*(.)\s*\[[^\]]+\]\*\* \[[a-f0-9]+\][^\n]*\n\s+- 时间: \d{4}-\d{2}-\d{2} (\d{2}:\d{2})',
+                r'\d+\. \*\*(.)\s*\[[^\]]+\]\*\* (?:\[[a-f0-9]+\]|`[a-f0-9]+`)[^\n]*\n\s+- 时间: \d{4}-\d{2}-\d{2} (\d{2}:\d{2})',
                 content,
             ):
                 timeline_data.append({

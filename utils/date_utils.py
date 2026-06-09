@@ -77,6 +77,11 @@ def safe_parse_commit_date(commit_date: Union[str, datetime]) -> datetime:
     if isinstance(commit_date, datetime):
         return commit_date
 
+    if isinstance(commit_date, str):
+        commit_date = commit_date.strip()
+        if not commit_date:
+            raise ValueError(f"无法解析日期格式: {commit_date}")
+
     # 尝试 ISO 格式
     try:
         return parse_iso_date(commit_date)
