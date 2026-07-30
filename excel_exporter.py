@@ -9,7 +9,7 @@ Excel 工时模板填充模块
 导出规则（简化后）：
 - 工时按权重分配为整数（避免出现小数）
 - 小任务按“任务汇总”合并，尽可能保证单条工时 >= 2h
-- 任务名称与任务描述尽量压缩，避免冗余前缀
+- 任务名称与任务描述均完整列出全部内容（不做截断概括）
 """
 from __future__ import annotations
 
@@ -34,6 +34,16 @@ HEADER_FIELD_MAP: dict[str, str] = {
     "计划结束日期": "end_date",
     "任务描述": "description",
 }
+
+
+def _format_full_list(names: list[str]) -> str:
+    """完整列出全部任务名；多条时编号换行。"""
+    names = [n.strip() for n in names if (n or "").strip()]
+    if not names:
+        return ""
+    if len(names) == 1:
+        return names[0]
+    return "\n".join(f"{i}. {n}" for i, n in enumerate(names, 1))
 
 
 def _check_openpyxl() -> None:
@@ -78,16 +88,13 @@ def merge_and_normalize_tasks(tasks: list[dict]) -> list[dict]:
     目标：
     - 导出工时为整数（避免 0.30 / 0.11 等小数）
     - 每条输出工时尽可能保证 >= 2h
-    - 压缩任务名称与任务描述：不再出现「综合开发 / 合并小任务 (<1h)」冗余前缀
+    - 任务名称与任务描述均完整列出全部内容
     """
     if not tasks:
         return []
 
-    def truncate_text(text: str, max_len: int = 60) -> str:
-        text = (text or "").strip()
-        if len(text) <= max_len:
-            return text
-        return text[: max_len - 1] + "..."
+    def full_name(item: dict) -> str:
+        return str(item.get("task_name", "")).strip()
 
     # 1) 按权重映射到“整数小时”（largest remainder）
     total_hours = sum(float(t.get("hours", 0) or 0) for t in tasks)
@@ -149,41 +156,41 @@ def merge_and_normalize_tasks(tasks: list[dict]) -> list[dict]:
     small_total = sum(i["allocated_hours"] for i in small_items)
 
     # 若小任务合计不足 2h，则并入最高优先级的大任务，避免产生 1h 输出条目
+    absorbed_items: list[dict] = []
     if small_items and big_items and small_total < 2:
+        absorbed_items = list(small_items)
         big_items[0]["allocated_hours"] += small_total
         small_total = 0
 
-    # 输出大任务（单条输出尽量精简）
-    for item in big_items:
-        task_name = truncate_text(str(item.get("task_name", "")))
-        task_type = str(item.get("task_type", "")).strip()
-        description = f"{task_type}：{task_name}".strip("：") if task_type else task_name
+    # 输出大任务：名称与描述均完整列出
+    for idx, item in enumerate(big_items):
+        name = full_name(item)
+        detail_names = [name]
+        if idx == 0 and absorbed_items:
+            for a in absorbed_items:
+                an = full_name(a)
+                if an:
+                    detail_names.append(an)
+        full_text = _format_full_list(detail_names)
         result.append({
-            "task_name": task_name,
+            "task_name": full_text,
             "hours": int(item["allocated_hours"]),
             "start_date": item.get("start_date", ""),
             "end_date": item.get("end_date", ""),
-            "description": description,
+            "description": full_text,
         })
 
     # 输出小任务汇总（仅当小任务合计 >=2）
     if small_items and small_total >= 2:
-        merged_names = [str(i.get("task_name", "")) for i in small_items]
-        preview_names = [truncate_text(n, 30) for n in merged_names[:3]]
-
-        first = preview_names[0] if preview_names else "小任务"
-        merged_name = f"任务汇总: {first} 等{len(small_items)}项"
-        description = "汇总包含: " + "；".join(preview_names)
-        if len(small_items) > 3:
-            description += f" 等{len(small_items)}项"
-
+        merged_names = [full_name(i) for i in small_items if full_name(i)]
+        full_text = _format_full_list(merged_names)
         base = small_items[0]
         result.append({
-            "task_name": merged_name,
+            "task_name": full_text,
             "hours": int(small_total),
             "start_date": base.get("start_date", ""),
             "end_date": base.get("end_date", ""),
-            "description": description,
+            "description": full_text,
         })
 
     # 兜底：单日总工时理论上为 8，因此输出小时不会超出 8
@@ -339,7 +346,18 @@ def fill_excel_template(
         }
         for field, col_idx in col_map.items():
             if field in field_values:
-                ws.cell(row=current_row, column=col_idx).value = field_values[field]
+                cell = ws.cell(row=current_row, column=col_idx)
+                cell.value = field_values[field]
+                val = field_values[field]
+                if field in ("task_name", "description") and isinstance(val, str) and "\n" in val:
+                    align = copy(cell.alignment) if cell.alignment else openpyxl.styles.Alignment()
+                    align.wrap_text = True
+                    align.vertical = "top"
+                    cell.alignment = align
+                    ws.row_dimensions[current_row].height = max(
+                        ws.row_dimensions[current_row].height or 15,
+                        15 * (val.count("\n") + 1),
+                    )
 
     wb.save(output_path)
     logger.info("Excel 导出完成：%s（共 %d 行）", output_path, len(tasks))
