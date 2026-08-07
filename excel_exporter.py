@@ -412,8 +412,8 @@ def parse_work_hours_md(content: str) -> dict:
         total_hours = float(th_match.group(1)) if th_match else 8.0
 
         # 解析 Markdown 表格行
-        # 格式: | **项目名** (4.5h) | 任务名 | 任务类型 | 2.50 | commitid | branch | url |
-        # 续行: |                   | 任务名 | 任务类型 | 2.00 | commitid | branch | url |
+        # 新格式: | **项目名** (4.5h) | 任务名 | 任务类型 | 2.50 | commitid | url |
+        # 旧格式: | **项目名** (4.5h) | 任务名 | 任务类型 | 2.50 | commitid | branch | url |
         table_row_pat = re.compile(r"^\|(.+)\|$", re.MULTILINE)
         projects: dict = {}
         current_project: str | None = None
@@ -432,7 +432,13 @@ def parse_work_hours_md(content: str) -> dict:
             task_type = cells[2] if len(cells) > 2 else ""
             hours_str = cells[3] if len(cells) > 3 else "0"
             commit_id = (cells[4] if len(cells) > 4 else "").strip()
-            branch = (cells[5] if len(cells) > 5 else "").strip()
+            # 兼容有/无「分支」列
+            col5 = (cells[5] if len(cells) > 5 else "").strip()
+            col6 = (cells[6] if len(cells) > 6 else "").strip()
+            if col6 or (col5.startswith("http://") or col5.startswith("https://")):
+                branch = "" if (col5.startswith("http://") or col5.startswith("https://")) else col5
+            else:
+                branch = col5
 
             # 判断是否有新项目名
             if project_cell:

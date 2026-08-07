@@ -18,8 +18,8 @@
 
 ## 📦 工作详情
 
-### Demo Project (demo/project-a)
-**项目链接**: [Demo Project](https://gitlab.example.com/demo/project-a) · 2 次
+### Demo Project
+**项目链接**: [demo/project-a](https://gitlab.example.com/demo/project-a) · 2 次
 
 **提交记录**:
 
@@ -30,16 +30,15 @@
 
 ---
 
-## ⏱️ 工时分配表
+## ⏱️ 工时分配（按项目）
 
 **统计日期**: 2026-01-15
 **标准工时**: 8.0 小时
 **实际分配**: 8.0 小时
 
-| 项目名称 | 任务名称 | 任务类型 | 工时(h) | Commit ID | 分支 | 项目地址 |
-|---------|---------|---------|--------|-----------|------|----------|
-| **project-a** (8.0h) | feat(auth): 增加登录校验 | 功能开发 | 3.81 | a1b2c3d4 | main | https://gitlab.example.com/demo/project-a |
-| | fix(ui): 修复按钮样式 | Bug修复 | 4.19 | b2c3d4e5 | main |  |
+| 项目名称 | 工时(h) | 提交数 | 项目地址 |
+|---------|--------|--------|----------|
+| **project-a** | 8.0 | 2 | https://gitlab.example.com/demo/project-a |
 
 ---
 
@@ -47,7 +46,7 @@
 
 本日共完成 2 次提交，涉及 1 个项目。
 主要工作类型为 **功能开发**（1 次）。
-- **Demo Project**：以Bug修复为主（2 次提交），涉及 ui、auth 等模块
+- **Demo Project**（2 次）：修复按钮样式；增加登录校验
 
 
 ---

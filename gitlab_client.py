@@ -14,7 +14,7 @@ from collections import defaultdict
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from utils.date_utils import parse_iso_date, parse_simple_date, to_gitlab_datetime
+from utils.date_utils import parse_iso_date, to_gitlab_datetime, to_local_date_str
 from config import GitLabConfig
 
 try:
@@ -99,52 +99,28 @@ def extract_gitlab_url(repo_url):
 
 def _should_skip_branch(branch_obj, since_date=None, until_date=None):
     """
-    检查分支是否应该被跳过（基于最后提交时间）
-    
-    Args:
-        branch_obj: GitLab 分支对象
-        since_date: 起始日期（可选，格式：YYYY-MM-DD）
-        until_date: 结束日期（可选，格式：YYYY-MM-DD）
-    
-    Returns:
-        bool: True 表示应该跳过，False 表示应该查询
+    基于分支 tip 日期判断是否可跳过整支查询。
+
+    仅当 tip 早于 since 时可跳过：tip 是最新提交，更早的祖先也必早于 since。
+    tip 晚于 until 时绝不可跳过：范围内仍可能有历史提交（例如查昨天，今天 tip 又前进）。
+
+    until_date 保留参数以兼容调用方，不参与跳过判断。
     """
-    if not since_date and not until_date:
-        # 没有日期限制，不跳过
+    if not since_date:
         return False
-    
+
     try:
-        # 获取分支的最后提交时间
-        commit = branch_obj.commit
+        commit = getattr(branch_obj, 'commit', None)
         if not commit:
             return False
-        
+
         commit_date_str = getattr(commit, 'committed_date', None)
-        if not commit_date_str:
+        if not commit_date_str or not isinstance(commit_date_str, str):
             return False
-        
-        # 解析提交日期
-        if isinstance(commit_date_str, str):
-            commit_date = parse_iso_date(commit_date_str)
-        else:
-            return False
-        
-        commit_date_only = commit_date.date()
-        
-        # 检查是否在日期范围内
-        if since_date:
-            since = parse_simple_date(since_date).date()
-            if commit_date_only < since:
-                return True  # 最后提交时间早于起始日期，跳过
-        
-        if until_date:
-            until = parse_simple_date(until_date).date()
-            if commit_date_only > until:
-                return True  # 最后提交时间晚于结束日期，跳过
-        
-        return False  # 在日期范围内，不跳过
+
+        # 按上海日历日比较，避免早上提交 UTC 落在前一天被误跳过
+        return to_local_date_str(commit_date_str) < since_date.strip()
     except Exception:
-        # 如果检查失败，不跳过（保守策略）
         return False
 
 
@@ -513,16 +489,7 @@ def group_commits_by_date(commits):
     grouped = defaultdict(list)
     
     for commit in commits:
-        # 解析提交日期
-        commit_date = commit.committed_date
-        if isinstance(commit_date, str):
-            # 解析 ISO 8601 格式日期
-            date_obj = parse_iso_date(commit_date)
-        else:
-            date_obj = commit_date
-        
-        # 提取日期部分（YYYY-MM-DD）
-        date_str = date_obj.strftime('%Y-%m-%d')
+        date_str = to_local_date_str(commit.committed_date)
         grouped[date_str].append(commit)
     
     # 按日期排序

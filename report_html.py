@@ -50,11 +50,16 @@ def parse_daily_report(file_path):
         feat_count = int(feat_matches[0]) if feat_matches else 0
         bug_count = int(bug_matches[0]) if bug_matches else 0
         
-        # 提取项目详情（兼容：单行「链接 · N 次」与旧版「提交数」分行）
+        # 提取项目详情（兼容新版「### 名 + 链接文字为路径」与旧版「### 名 (path)」）
         project_sections = re.findall(
-            r'### (.*?) \(([^)]+)\)\n\*\*项目链接\*\*: \[[^\]]+\]\([^)]+\)\s*·\s*(\d+)\s*次',
+            r'### (.+?)\n\*\*项目链接\*\*: \[([^\]]+)\]\([^)]+\)\s*·\s*(\d+)\s*次',
             content,
         )
+        if not project_sections:
+            project_sections = re.findall(
+                r'### (.*?) \(([^)]+)\)\n\*\*项目链接\*\*: \[[^\]]+\]\([^)]+\)\s*·\s*(\d+)\s*次',
+                content,
+            )
         if not project_sections:
             project_sections = re.findall(
                 r'### (.*?) \(([^)]+)\)\n\*\*项目链接\*\*.*?\n\*\*提交数\*\*: (\d+) 次',
@@ -63,10 +68,13 @@ def parse_daily_report(file_path):
             )
         projects_data = []
         for match in project_sections:
+            name, path_or_link, commits = match[0], match[1], match[2]
+            # 新版链接文字即 path；旧版第二组已是 path
+            path = path_or_link
             projects_data.append({
-                'name': match[0],
-                'path': match[1],
-                'commits': int(match[2])
+                'name': name.strip(),
+                'path': path.strip(),
+                'commits': int(commits)
             })
         
         # 提取时间线（旧版 bullet 或新版「提交记录」列表）

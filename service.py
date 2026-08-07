@@ -543,7 +543,7 @@ class Git2LogsService:
     def _collect_commits_data(all_results, since_date=None, until_date=None):
         """将 all_results 转换为 AI 分析所需的 commits_data 字典。"""
         from commit_analysis import calculate_code_statistics
-        from utils.date_utils import parse_iso_date
+        from utils.date_utils import to_local_date_str, to_local_datetime
 
         commits_data = {
             'total_commits': 0,
@@ -574,15 +574,10 @@ class Git2LogsService:
                 if commit.message:
                     all_messages.append(commit.message[:200])
 
-                commit_date = commit.committed_date
-                if isinstance(commit_date, str):
-                    date_obj = parse_iso_date(commit_date)
-                else:
-                    date_obj = commit_date
-                date_str = date_obj.strftime('%Y-%m-%d')
-                all_dates.add(date_str)
+                local_dt = to_local_datetime(commit.committed_date)
+                all_dates.add(to_local_date_str(commit.committed_date))
 
-                month_key = date_obj.strftime('%Y-%m')
+                month_key = local_dt.strftime('%Y-%m')
                 commits_data['time_distribution'][month_key] = (
                     commits_data['time_distribution'].get(month_key, 0) + 1
                 )
