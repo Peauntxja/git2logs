@@ -270,6 +270,14 @@ class OpenAICompatibleService(BaseAIService):
         """
         return []
 
+    def _build_token_params(self) -> dict:
+        """返回输出长度限制参数（OpenAI 官方 GPT-5/o 系列需 max_completion_tokens）。"""
+        return {"max_tokens": AIConfig.MAX_TOKENS}
+
+    def _extra_request_params(self) -> dict:
+        """返回额外请求参数（子类可重写，如 DeepSeek thinking）。"""
+        return {}
+
     def _get_service_name(self) -> str:
         """返回服务名称（用于错误消息）"""
         return self.__class__.__name__.replace('Service', '')
@@ -301,9 +309,10 @@ class OpenAICompatibleService(BaseAIService):
                 {"role": "user", "content": prompt}
             ],
             "temperature": AIConfig.TEMPERATURE,
-            "max_tokens": AIConfig.MAX_TOKENS,
             "top_p": AIConfig.TOP_P,
         }
+        request_params.update(self._build_token_params())
+        request_params.update(self._extra_request_params())
 
         # 检查是否支持 JSON 模式
         json_mode_models = self._get_json_mode_models()

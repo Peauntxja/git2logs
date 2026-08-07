@@ -125,9 +125,16 @@ class AiTabMixin:
         model_label.grid(row=config_row, column=0, sticky="w", padx=20, pady=(0, 8))
         self._track_label_primary(model_label)
         
-        self.ai_model = ctk.StringVar(value="gpt-4.1-mini")
+        self.ai_model = ctk.StringVar(value="gpt-5.6-luna")
         self.ai_model_combo = ctk.CTkComboBox(self.ai_config_frame,
-                                             values=["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"],
+                                             values=[
+                                                 "gpt-5.6-luna",
+                                                 "gpt-5.6-terra",
+                                                 "gpt-5.6-sol",
+                                                 "gpt-5.4-mini",
+                                                 "gpt-4.1-mini",
+                                                 "gpt-4o-mini",
+                                             ],
                                              variable=self.ai_model,
                                              font=ctk.CTkFont(size=13),
                                              height=34,

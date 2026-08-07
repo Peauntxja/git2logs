@@ -29,7 +29,7 @@ class AICatalogTests(unittest.TestCase):
                 self.assertIn(default, options)
 
     def test_unknown_service_falls_back_to_openai(self):
-        self.assertEqual(get_provider_default_model("unknown"), "gpt-4.1-mini")
+        self.assertEqual(get_provider_default_model("unknown"), "gpt-5.6-luna")
         self.assertTrue(len(get_provider_models("unknown")) > 0)
 
 
