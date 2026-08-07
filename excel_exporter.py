@@ -81,6 +81,50 @@ def _copy_cell_style(src_cell, dst_cell) -> None:
         dst_cell.number_format = src_cell.number_format
 
 
+def _freeze_cell_style(cell) -> dict | None:
+    """在删行前冻结样式，避免 delete_rows 后 Cell 引用失效。"""
+    if cell is None or not cell.has_style:
+        return None
+    return {
+        "font": copy(cell.font),
+        "fill": copy(cell.fill),
+        "alignment": copy(cell.alignment),
+        "border": copy(cell.border),
+        "number_format": cell.number_format,
+    }
+
+
+def _apply_frozen_style(dst_cell, style: dict | None) -> None:
+    if not style:
+        return
+    dst_cell.font = style["font"]
+    dst_cell.fill = style["fill"]
+    dst_cell.alignment = style["alignment"]
+    dst_cell.border = style["border"]
+    dst_cell.number_format = style["number_format"]
+
+
+def _collect_row_defaults(ws, header_row: int, max_col: int) -> list[tuple]:
+    """
+    从表头下旧数据行提取每列默认值与样式。
+    指派人/确认人/状态等非变更列：取首个非空值；样式取首个有样式的单元格。
+    """
+    data_start = header_row + 1
+    data_end = int(ws.max_row or header_row)
+    defaults: list[tuple] = []
+    for col_idx in range(1, max_col + 1):
+        value = None
+        style = None
+        for row_idx in range(data_start, data_end + 1):
+            cell = ws.cell(row=row_idx, column=col_idx)
+            if style is None:
+                style = _freeze_cell_style(cell)
+            if value is None and cell.value not in (None, ""):
+                value = cell.value
+        defaults.append((value, style))
+    return defaults
+
+
 def merge_and_normalize_tasks(tasks: list[dict]) -> list[dict]:
     """
     对任务列表进行合并与规范化（针对同一天的任务）。
@@ -263,8 +307,8 @@ def fill_excel_template(
 
     模板约定：
     - 存在一行表头，包含"任务名称"、"预计工时"等关键字
-    - 表头下方有一行示例数据（提供样式和其他列的默认值）
-    - 函数会删除示例行，插入实际任务行
+    - 表头下旧行提供样式，以及指派人/确认人/状态等非变更列的默认值
+    - 导出前清空旧任务行，再写入本次数据；仅覆盖任务名/工时/日期/描述
 
     Args:
         template_path: Excel 模板文件路径
@@ -311,17 +355,16 @@ def fill_excel_template(
     if not col_map:
         raise ValueError("模板中没有可识别的目标列，请检查表头名称")
 
-    # 3. 读取示例行（表头下一行）并记录整行样式
+    # 3. 从旧数据提取默认值/样式（删行前冻结，保留指派人等非变更列）
     example_row_idx = header_row + 1
     max_col = ws.max_column
+    fill_cols = set(col_map.values())
+    example_row_data = _collect_row_defaults(ws, header_row, max_col)
 
-    example_row_data: list[tuple] = []
-    for col_idx in range(1, max_col + 1):
-        cell = ws.cell(row=example_row_idx, column=col_idx)
-        example_row_data.append((cell.value, cell if cell.has_style else None))
-
-    # 4. 删除示例行
-    ws.delete_rows(example_row_idx)
+    # 4. 清空表头下方全部旧任务行（避免上月明细残留）
+    old_rows = max(0, int(ws.max_row or header_row) - header_row)
+    if old_rows > 0:
+        ws.delete_rows(example_row_idx, old_rows)
 
     # 5. 逐任务插入行
     insert_at = example_row_idx
@@ -329,14 +372,14 @@ def fill_excel_template(
         current_row = insert_at + i
         ws.insert_rows(current_row)
 
-        # 先用示例行填充默认值和样式
-        for col_idx, (default_val, src_cell) in enumerate(example_row_data, start=1):
+        # 非变更列沿用模板旧值；变更列稍后覆盖
+        for col_idx, (default_val, style) in enumerate(example_row_data, start=1):
             dst = ws.cell(row=current_row, column=col_idx)
-            dst.value = default_val
-            if src_cell is not None:
-                _copy_cell_style(src_cell, dst)
+            if col_idx not in fill_cols:
+                dst.value = default_val
+            _apply_frozen_style(dst, style)
 
-        # 覆盖需要填充的字段
+        # 覆盖任务名/工时/日期/描述
         field_values = {
             "task_name": task["task_name"],
             "hours": task["hours"],

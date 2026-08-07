@@ -110,7 +110,7 @@ class GoldenReportTests(unittest.TestCase):
 
     def test_fill_excel_template_row_count(self):
         try:
-            import openpyxl  # noqa: F401
+            import openpyxl
         except ImportError:
             self.skipTest("openpyxl 未安装")
 
@@ -124,14 +124,49 @@ class GoldenReportTests(unittest.TestCase):
         if out.exists():
             out.unlink()
 
+        # 在模板副本中塞入“上月”残留行 + 非变更列，确认导出会清空旧任务但保留参考字段
+        dirty = FIXTURES / "_test_dirty_template.xlsx"
+        wb = openpyxl.load_workbook(template)
+        ws = wb.active
+        from excel_exporter import _find_header_row
+        header_row = _find_header_row(ws)
+        self.assertIsNotNone(header_row)
+        stale_marker = "__STALE_OLD_MONTH__"
+        ws.cell(row=header_row + 1, column=1, value=stale_marker)
+        # 额外列：指派人/确认人/状态（非导出覆盖列）
+        assignee_col = ws.max_column + 1
+        ws.cell(row=header_row, column=assignee_col, value="指派任务人")
+        ws.cell(row=header_row + 1, column=assignee_col, value="")
+        ws.cell(row=header_row + 2, column=1, value="上月任务A")
+        ws.cell(row=header_row + 2, column=assignee_col, value="张三")
+        ws.cell(row=header_row + 3, column=1, value="上月任务B")
+        ws.cell(row=header_row + 3, column=assignee_col, value="张三")
+        wb.save(dirty)
+        wb.close()
+
         count = fill_excel_template(
-            template_path=template,
+            template_path=dirty,
             work_hours_data=wh_data,
             output_path=out,
         )
         self.assertEqual(count, meta["excel_expected_row_count"])
         self.assertTrue(out.exists())
+
+        out_wb = openpyxl.load_workbook(out)
+        out_ws = out_wb.active
+        values = [
+            str(c.value) if c.value is not None else ""
+            for row in out_ws.iter_rows()
+            for c in row
+        ]
+        self.assertNotIn(stale_marker, values)
+        self.assertNotIn("上月任务A", values)
+        self.assertEqual(out_ws.max_row, header_row + count)
+        for row_idx in range(header_row + 1, header_row + count + 1):
+            self.assertEqual(out_ws.cell(row=row_idx, column=assignee_col).value, "张三")
+        out_wb.close()
         out.unlink()
+        dirty.unlink()
 
 
 class ReportHtmlTests(unittest.TestCase):
