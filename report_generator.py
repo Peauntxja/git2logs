@@ -18,12 +18,13 @@ from collections import defaultdict
 from pathlib import Path
 
 from utils.date_utils import (
-    parse_iso_date,
     parse_simple_date,
     safe_parse_commit_date,
     format_date_chinese,
     format_date_range,
     get_date_range_days,
+    to_local_datetime,
+    to_local_date_str,
 )
 from config import ReportConfig
 from commit_analysis import (
@@ -31,7 +32,11 @@ from commit_analysis import (
     calculate_code_statistics, get_commit_display_info,
     is_merge_commit,
 )
-from work_hours import calculate_work_hours, format_work_hours_table
+from work_hours import (
+    calculate_work_hours,
+    format_work_hours_table,
+    format_work_hours_project_summary,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -112,13 +117,8 @@ def generate_markdown_log(grouped_commits, author_name, repo_name=None, project=
             
             lines.append(f"### {idx}. [{commit_id}]({commit_url}) {short_message}\n")
             
-            # 提交时间
-            commit_time = commit.committed_date
-            if isinstance(commit_time, str):
-                time_obj = parse_iso_date(commit_time)
-            else:
-                time_obj = commit_time
-            time_str = time_obj.strftime('%H:%M:%S')
+            # 提交时间（上海时区）
+            time_str = to_local_datetime(commit.committed_date).strftime('%H:%M:%S')
             lines.append(f"**时间**: {time_str}\n")
             
             # 显示完整的commit message（如果有多行）
@@ -195,12 +195,7 @@ def generate_multi_project_markdown(all_results, author_name, since_date=None, u
     for project_path, result in all_results.items():
         commits = result['commits']
         for commit in commits:
-            commit_date = commit.committed_date
-            if isinstance(commit_date, str):
-                date_obj = parse_iso_date(commit_date)
-            else:
-                date_obj = commit_date
-            date_str = date_obj.strftime('%Y-%m-%d')
+            date_str = to_local_date_str(commit.committed_date)
             all_commits_by_date[date_str].append({
                 'project': project_path,
                 'commit': commit
@@ -261,12 +256,7 @@ def generate_multi_project_markdown(all_results, author_name, since_date=None, u
                 
                 lines.append(f"#### {idx}. [{commit_id}]({commit_url}) {short_message}\n")
                 
-                commit_time = commit.committed_date
-                if isinstance(commit_time, str):
-                    time_obj = parse_iso_date(commit_time)
-                else:
-                    time_obj = commit_time
-                time_str = time_obj.strftime('%H:%M:%S')
+                time_str = to_local_datetime(commit.committed_date).strftime('%H:%M:%S')
                 lines.append(f"**时间**: {time_str}\n")
                 
                 # 显示完整的commit message（如果有多行）
@@ -767,29 +757,37 @@ def _normalize_report_date(date_val):
     return date_val
 
 
+def _clean_commit_subject(message: str) -> str:
+    """去掉 conventional commit 前缀，留下可读主题。"""
+    first = (message or "").split("\n")[0].strip()
+    cleaned = re.sub(
+        r"^(?:feat|fix|refactor|style|perf|chore|docs|test|build|ci|revert)(?:\([^)]*\))?:\s*",
+        "",
+        first,
+        count=1,
+        flags=re.I,
+    ).strip()
+    return cleaned or first
+
+
 def _build_daily_theme_summary(project_commits):
-    """按项目生成一句主题摘要（规则驱动，无 AI）。"""
+    """按项目生成可读主题句（取前几条 subject，非模板化「涉及 xx 模块」）。"""
     theme_lines = []
     for project_path in sorted(project_commits.keys()):
         info = project_commits[project_path]
-        name = info['project'].name
-        commits = info['commits']
+        name = info["project"].name
+        commits = info["commits"]
         if not commits:
             continue
-        type_counts = defaultdict(int)
-        scopes = []
+        subjects = []
         for item in commits:
-            type_counts[item['type']] += 1
-            first_line = (item['commit'].message or '').split('\n')[0]
-            scope_match = re.match(r'^\w+\(([^)]+)\):', first_line, re.I)
-            if scope_match:
-                scopes.append(scope_match.group(1))
-        main_type = max(type_counts.items(), key=lambda x: x[1])[0]
-        unique_scopes = list(dict.fromkeys(scopes))[:3]
-        scope_hint = f"，涉及 {'、'.join(unique_scopes)} 等模块" if unique_scopes else ""
-        theme_lines.append(
-            f"**{name}**：以{main_type}为主（{len(commits)} 次提交）{scope_hint}"
-        )
+            subj = _clean_commit_subject(item["commit"].message or "")
+            if subj and subj not in subjects:
+                subjects.append(subj)
+        preview = "；".join(subjects[:2])
+        if len(subjects) > 2:
+            preview += f" 等{len(subjects)}项"
+        theme_lines.append(f"**{name}**（{len(commits)} 次）：{preview}")
     return theme_lines
 
 
@@ -855,10 +853,6 @@ def generate_daily_report(all_results, author_name, since_date=None, until_date=
     lines.append(f"**生成时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
     lines.append("\n---\n\n")
     
-    # 工作概览
-    total_projects = len(all_results)
-    total_commits = sum(len(result['commits']) for result in all_results.values())
-    
     # 按类型统计
     commit_types = defaultdict(int)
     commits_by_type = defaultdict(list)
@@ -889,12 +883,8 @@ def generate_daily_report(all_results, author_name, since_date=None, until_date=
                 'commit': commit
             })
             
-            # 解析时间
-            commit_time = commit.committed_date
-            if isinstance(commit_time, str):
-                time_obj = parse_iso_date(commit_time)
-            else:
-                time_obj = commit_time
+            # 解析时间（上海时区）
+            time_obj = to_local_datetime(commit.committed_date)
             
             if time_range['start'] is None or time_obj < time_range['start']:
                 time_range['start'] = time_obj
@@ -912,7 +902,10 @@ def generate_daily_report(all_results, author_name, since_date=None, until_date=
         # 按时间排序
         project_commits[project_path]['commits'].sort(key=lambda x: x['time'], reverse=True)
     
-    # 工作概览
+    # 工作概览（提交数以过滤 Merge 后为准）
+    total_commits = sum(len(info['commits']) for info in project_commits.values())
+    total_projects = sum(1 for info in project_commits.values() if info['commits'])
+
     lines.append("## 📊 工作概览\n\n")
     lines.append(f"- **涉及项目**: {total_projects} 个\n")
     lines.append(f"- **总提交数**: {total_commits} 次\n")
@@ -924,7 +917,6 @@ def generate_daily_report(all_results, author_name, since_date=None, until_date=
     
     lines.append(f"- **工作类型分布**:\n")
     for commit_type, count in sorted(commit_types.items(), key=lambda x: x[1], reverse=True):
-        emoji = analyze_commit_type('')[1] if commit_type == '其他' else commits_by_type[commit_type][0]['commit'].message
         type_emoji = analyze_commit_type(commits_by_type[commit_type][0]['commit'].message)[1] if commits_by_type[commit_type] else '📌'
         lines.append(f"  - {type_emoji} {commit_type}: {count} 次\n")
     
@@ -937,11 +929,12 @@ def generate_daily_report(all_results, author_name, since_date=None, until_date=
         project_info = project_commits[project_path]
         project = project_info['project']
         commits = project_info['commits']
+        if not commits:
+            continue
         
-        lines.append(f"### {project.name} ({project_path})\n")
-        # 链接与条数合并为一行；类型以每条提交前缀为准，避免重复统计
+        lines.append(f"### {project.name}\n")
         lines.append(
-            f"**项目链接**: [{project.name}]({project.web_url}) · {len(commits)} 次\n\n"
+            f"**项目链接**: [{project_path}]({project.web_url}) · {len(commits)} 次\n\n"
         )
         lines.append("**提交记录**:\n\n")
         
@@ -1006,10 +999,10 @@ def generate_daily_report(all_results, author_name, since_date=None, until_date=
     try:
         work_hours_data = calculate_work_hours(all_results, since_date, until_date, branch=branch)
 
-        # 单日报告: 显示该日的详细工时分配表
+        # 单日报告: 按项目汇总工时，避免与工作详情逐条重复
         if since_date and until_date and since_date == until_date:
             if since_date in work_hours_data:
-                lines.append(format_work_hours_table(work_hours_data[since_date]))
+                lines.append(format_work_hours_project_summary(work_hours_data[since_date]))
                 lines.append("---\n\n")
         # 区间报告: 显示工时汇总
         else:

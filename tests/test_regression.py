@@ -229,10 +229,69 @@ class CommitAnalysisTests(unittest.TestCase):
 
         self.assertEqual(analyze_commit_type("perf(views): 优化委员会组织树加载体验"), ("性能优化", "⚡"))
 
+    def test_feat_with_fix_keyword_is_bugfix(self):
+        from commit_analysis import analyze_commit_type
+
+        self.assertEqual(analyze_commit_type("feat:修复新增时 id 传参"), ("Bug修复", "🐛"))
+        self.assertEqual(analyze_commit_type("feat(auth): 增加登录校验"), ("功能开发", "✨"))
+
     def test_format_date_chinese_strips_whitespace(self):
         from utils.date_utils import format_date_chinese
 
         self.assertEqual(format_date_chinese(" 2026-06-08 "), "2026年06月08日")
+        self.assertEqual(format_date_chinese("2026-08-06"), "2026年08月06日")
+
+
+class BranchSkipTests(unittest.TestCase):
+    def _branch(self, committed_date: str):
+        commit = mock.Mock()
+        commit.committed_date = committed_date
+        branch = mock.Mock()
+        branch.commit = commit
+        branch.name = "main"
+        return branch
+
+    def test_tip_after_until_must_not_skip(self):
+        """查昨天时 tip 已到今天，仍应查询（旧逻辑会误跳过）。"""
+        from gitlab_client import _should_skip_branch
+
+        branch = self._branch("2026-08-07T10:00:00Z")
+        self.assertFalse(
+            _should_skip_branch(branch, since_date="2026-08-06", until_date="2026-08-06")
+        )
+
+    def test_tip_before_since_skips(self):
+        from gitlab_client import _should_skip_branch
+
+        branch = self._branch("2026-08-01T10:00:00Z")
+        self.assertTrue(
+            _should_skip_branch(branch, since_date="2026-08-06", until_date="2026-08-06")
+        )
+
+    def test_morning_shanghai_tip_not_skipped(self):
+        """上海早上 7:30 提交（UTC 前一天 23:30），查当天不应跳过。"""
+        from gitlab_client import _should_skip_branch
+
+        branch = self._branch("2026-08-05T23:30:00Z")
+        self.assertFalse(
+            _should_skip_branch(branch, since_date="2026-08-06", until_date="2026-08-06")
+        )
+
+
+class TimezoneTests(unittest.TestCase):
+    def test_to_gitlab_datetime_shanghai_day(self):
+        from utils.date_utils import to_gitlab_datetime
+
+        self.assertEqual(to_gitlab_datetime("2026-08-06"), "2026-08-05T16:00:00Z")
+        self.assertEqual(
+            to_gitlab_datetime("2026-08-06", end_of_day=True),
+            "2026-08-06T15:59:59Z",
+        )
+
+    def test_morning_commit_maps_to_shanghai_day(self):
+        from utils.date_utils import to_local_date_str
+
+        self.assertEqual(to_local_date_str("2026-08-05T23:30:00Z"), "2026-08-06")
 
 
 if __name__ == "__main__":

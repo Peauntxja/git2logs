@@ -9,16 +9,11 @@
 
 import logging
 import math
-from datetime import datetime
 from collections import defaultdict
 
 from config import ReportConfig
 from commit_analysis import analyze_commit_type, is_merge_commit
-
-
-def _parse_iso_date(date_string: str) -> datetime:
-    """解析 ISO 格式日期字符串（处理 Z 时区后缀）"""
-    return datetime.fromisoformat(date_string.replace('Z', '+00:00'))
+from utils.date_utils import to_local_date_str
 
 logger = logging.getLogger(__name__)
 
@@ -175,13 +170,7 @@ def calculate_work_hours(all_results, since_date=None, until_date=None,
         project_obj = result.get('project')  # 获取项目对象
 
         for commit in commits:
-            # 解析日期
-            commit_date = commit.committed_date
-            if isinstance(commit_date, str):
-                date_obj = _parse_iso_date(commit_date)
-            else:
-                date_obj = commit_date
-            date_str = date_obj.strftime('%Y-%m-%d')
+            date_str = to_local_date_str(commit.committed_date)
 
             commits_by_date[date_str].append({
                 'project': project_path,
@@ -401,7 +390,7 @@ def calculate_work_hours(all_results, since_date=None, until_date=None,
 
 def format_work_hours_table(date_data):
     """
-    格式化工时数据为Markdown表格
+    格式化工时数据为Markdown表格（任务明细，供独立工时报告使用）
 
     Args:
         date_data: 单日工时数据
@@ -419,35 +408,60 @@ def format_work_hours_table(date_data):
     actual_hours = sum(p['total_hours'] for p in date_data['projects'].values())
     lines.append(f"**实际分配**: {actual_hours:.1f} 小时\n\n")
 
-    # 生成表格
-    lines.append("| 项目名称 | 任务名称 | 任务类型 | 工时(h) | Commit ID | 分支 | 项目地址 |\n")
-    lines.append("|---------|---------|---------|--------|-----------|------|----------|\n")
+    # 生成表格（去掉无信息量的「分支」列）
+    lines.append("| 项目名称 | 任务名称 | 任务类型 | 工时(h) | Commit ID | 项目地址 |\n")
+    lines.append("|---------|---------|---------|--------|-----------|----------|\n")
 
     for project_path, project_data in date_data['projects'].items():
         project_name = project_data['project_name']
         project_hours = project_data['total_hours']
 
-        # 第一行显示项目汇总
         first_task = True
         for task in project_data['tasks']:
-            # 截断过长的commit信息
             commit_id = task.get('commit_id', '')[:8]
-            branch_name = task.get('branch', 'N/A')
-            if len(branch_name) > 20:
-                branch_name = branch_name[:17] + '...'
-
-            # 项目地址 - 每个项目首行显示项目主页，后续行留空
             gitlab_url = task.get('gitlab_url', '')
-            if first_task:
-                display_url = gitlab_url or 'N/A'
-            else:
-                display_url = ''
+            display_url = (gitlab_url or 'N/A') if first_task else ''
 
             if first_task:
-                lines.append(f"| **{project_name}** ({project_hours:.1f}h) | {task['task_name']} | {task['task_type']} | {task['hours']:.2f} | {commit_id} | {branch_name} | {display_url} |\n")
+                lines.append(
+                    f"| **{project_name}** ({project_hours:.1f}h) | {task['task_name']} | "
+                    f"{task['task_type']} | {task['hours']:.2f} | {commit_id} | {display_url} |\n"
+                )
                 first_task = False
             else:
-                lines.append(f"| | {task['task_name']} | {task['task_type']} | {task['hours']:.2f} | {commit_id} | {branch_name} | {display_url} |\n")
+                lines.append(
+                    f"| | {task['task_name']} | {task['task_type']} | "
+                    f"{task['hours']:.2f} | {commit_id} | {display_url} |\n"
+                )
+
+    lines.append("\n")
+    return ''.join(lines)
+
+
+def format_work_hours_project_summary(date_data):
+    """
+    按项目汇总工时（供日报内嵌，避免与工作详情重复逐条列出）。
+    """
+    lines = []
+    lines.append("## ⏱️ 工时分配（按项目）\n\n")
+    lines.append(f"**统计日期**: {date_data['date']}\n")
+    lines.append(f"**标准工时**: {date_data['total_hours']} 小时\n")
+
+    actual_hours = sum(p['total_hours'] for p in date_data['projects'].values())
+    lines.append(f"**实际分配**: {actual_hours:.1f} 小时\n\n")
+
+    lines.append("| 项目名称 | 工时(h) | 提交数 | 项目地址 |\n")
+    lines.append("|---------|--------|--------|----------|\n")
+
+    for _path, project_data in date_data['projects'].items():
+        name = project_data['project_name']
+        hours = project_data['total_hours']
+        count = project_data.get('commit_count') or len(project_data.get('tasks') or [])
+        url = ''
+        tasks = project_data.get('tasks') or []
+        if tasks:
+            url = tasks[0].get('gitlab_url', '') or ''
+        lines.append(f"| **{name}** | {hours:.1f} | {count} | {url or 'N/A'} |\n")
 
     lines.append("\n")
     return ''.join(lines)

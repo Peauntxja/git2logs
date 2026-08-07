@@ -10,6 +10,7 @@
 import signal
 import logging
 import functools
+import re
 
 from config import GitLabConfig
 
@@ -53,6 +54,10 @@ def analyze_commit_type(commit_message):
     if message_lower.startswith('fix') or message_lower.startswith('修复'):
         return ('Bug修复', '🐛')
     elif message_lower.startswith('feat') or message_lower.startswith('新增') or message_lower.startswith('添加'):
+        # feat:修复... 实际是修 bug，纠偏为 Bug修复
+        subject = re.sub(r'^feat(?:\([^)]*\))?:\s*', '', commit_message, count=1, flags=re.I).lstrip()
+        if subject.startswith('修复') or subject.lower().startswith('fix'):
+            return ('Bug修复', '🐛')
         return ('功能开发', '✨')
     elif message_lower.startswith('refactor') or message_lower.startswith('重构'):
         return ('代码重构', '♻️')
