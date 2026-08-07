@@ -18,4 +18,8 @@ class DeepSeekService(OpenAICompatibleService):
         return "https://api.deepseek.com"
 
     def _get_json_mode_models(self) -> List[str]:
-        return ['deepseek-v4', 'deepseek-chat']
+        return ['deepseek-v4']
+
+    def _extra_request_params(self) -> dict:
+        # V4 默认开启 thinking；日报分析关闭以降低时延与费用
+        return {"extra_body": {"thinking": {"type": "disabled"}}}
