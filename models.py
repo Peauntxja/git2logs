@@ -86,6 +86,11 @@ class ReportGenerationError(Git2LogsError):
     pass
 
 
+class OperationCancelled(Git2LogsError):
+    """用户取消了当前任务"""
+    pass
+
+
 class ExportError(Git2LogsError):
     """导出操作失败"""
     pass

@@ -70,6 +70,15 @@ class ActionsTabMixin:
             progress_color=self.styles.colors['accent'],
         )
 
+        self._task_summary = ctk.CTkLabel(
+            status_row,
+            text="",
+            font=self.styles.fonts['caption'](),
+            text_color=self.styles.colors['text_secondary'],
+            anchor="w",
+        )
+        self._task_summary.pack(side="left", padx=(12, 0))
+
         # 主题切换按钮（右侧）
         theme_btn = ctk.CTkButton(status_row,
                                  text="☀ 浅色",
@@ -92,6 +101,7 @@ class ActionsTabMixin:
         button_frame.grid_columnconfigure(0, weight=2, uniform="buttons")  # 主按钮更宽
         button_frame.grid_columnconfigure(1, weight=1, uniform="buttons")
         button_frame.grid_columnconfigure(2, weight=1, uniform="buttons")
+        button_frame.grid_columnconfigure(3, weight=1, uniform="buttons")
 
         # 主按钮 - 生成日志
         self.generate_btn = ctk.CTkButton(button_frame,
@@ -119,6 +129,20 @@ class ActionsTabMixin:
                                 command=self.clear_logs)
         self.clear_btn.grid(row=0, column=1, padx=(0, self.styles.spacing['sm']), sticky="ew")
 
+        self.cancel_btn = ctk.CTkButton(button_frame,
+                                        text="取消",
+                                        height=36,
+                                        font=self.styles.fonts['body'](),
+                                        corner_radius=self.styles.radius['md'],
+                                        fg_color=self.bg_card,
+                                        text_color=self.text_primary,
+                                        hover_color=self.styles.colors['hover'],
+                                        border_width=1,
+                                        border_color=self.border_color,
+                                        state="disabled",
+                                        command=self.cancel_generation)
+        self.cancel_btn.grid(row=0, column=2, padx=(0, self.styles.spacing['sm']), sticky="ew")
+
         # AI分析按钮
         self.ai_analysis_btn = ctk.CTkButton(button_frame,
                                            text="AI 分析",
@@ -132,7 +156,7 @@ class ActionsTabMixin:
                                            border_color=self.border_color,
                                            state="normal",
                                            command=self._manual_ai_analysis)
-        self.ai_analysis_btn.grid(row=0, column=2, sticky="ew")
+        self.ai_analysis_btn.grid(row=0, column=3, sticky="ew")
 
         # 绑定窗口大小变化响应式回调
         self.root.bind('<Configure>', self._on_window_resize)

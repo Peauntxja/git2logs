@@ -8,6 +8,8 @@ import queue
 import sys
 import threading
 import traceback
+import subprocess
+import time
 from datetime import datetime
 from tkinter import filedialog, messagebox
 
@@ -25,6 +27,7 @@ from models import (
     GitLabConnectionError,
     ReportGenerationError,
     ReportParams,
+    OperationCancelled,
 )
 from service import Git2LogsService
 from gui.styles import (
@@ -215,6 +218,8 @@ class HandlersMixin:
             self.generate_btn.configure(text="⏳ 生成中...", state="disabled",
                                        fg_color=c['accent'],
                                        hover_color=c['accent_hover'])
+            if hasattr(self, "cancel_btn"):
+                self.cancel_btn.configure(state="normal")
             self._update_status("正在生成日志…", "running")
             if hasattr(self, "_run_progress"):
                 try:
@@ -226,13 +231,52 @@ class HandlersMixin:
             self.generate_btn.configure(text="▶  开始生成", state="normal",
                                        fg_color=c['success'],
                                        hover_color=c['success_hover'])
+            if hasattr(self, "cancel_btn"):
+                self.cancel_btn.configure(state="disabled")
             self._update_status("就绪", "success")
             if hasattr(self, "_run_progress"):
                 try:
                     self._run_progress.stop()
+                    self._run_progress.configure(mode="indeterminate")
                     self._run_progress.pack_forget()
                 except Exception:
                     logger.debug("停止进度条动画失败")
+
+    def cancel_generation(self):
+        """请求取消当前日报生成任务。"""
+        if getattr(self, "_is_running", False):
+            self._cancel_event.set()
+            self._update_status("正在取消…", "warning")
+            self.cancel_btn.configure(state="disabled")
+
+    def _update_task_summary(self, params):
+        scope = "全部项目" if params["scan_all"] or not params["repo"] else params["repo"]
+        date_range = "今天" if params["use_today"] else (params["since_date"] or params["until_date"] or "全部时间")
+        self._task_summary.configure(
+            text=f"{scope} · {date_range} · {params['output_format']}",
+        )
+
+    def _update_generate_progress(self, stage, completed, total, current):
+        if stage == "scan" and total:
+            percentage = int(completed * 100 / total)
+            if percentage == getattr(self, "_last_scan_progress_percent", -1):
+                return
+            self._last_scan_progress_percent = percentage
+
+        def update():
+            if not getattr(self, "_is_running", False):
+                return
+            if stage == "scan" and total:
+                self._run_progress.stop()
+                self._run_progress.configure(mode="determinate")
+                self._run_progress.set(completed / total)
+                self._update_status(f"扫描项目 {completed}/{total}", "running")
+            elif stage == "generate":
+                self._last_scan_progress_percent = -1
+                self._run_progress.configure(mode="indeterminate")
+                self._run_progress.start()
+                self._update_status("正在生成报告…", "running")
+        self.root.after(0, update)
 
     _TOPBAR_META = {
         "GitLab配置": ("GitLab 配置", "配置 GitLab 连接参数"),
@@ -345,10 +389,16 @@ class HandlersMixin:
         try:
             self.output_label.configure(text="输出目录")
             format_value = self.output_format.get()
-            if format_value == "all":
-                self.output_hint.configure(text="提示: 批量生成时，所有文件将保存到选择的目录")
-            else:
-                self.output_hint.configure(text="提示: 生成的文件将保存到选择的目录")
+            descriptions = {
+                "commits": "生成提交明细 Markdown 文件",
+                "daily_report": "生成适合提交日报的 Markdown 文件",
+                "work_hours": "生成工时报告及 JSON 数据文件",
+                "statistics": "生成代码统计 Markdown 文件",
+                "html": "生成日报 HTML 文件",
+                "png": "生成日报 PNG 图片，需要 Chrome 或 Playwright",
+                "all": "批量生成 Markdown、HTML、PNG 等全部报告",
+            }
+            self.output_hint.configure(text=f"提示: {descriptions.get(format_value, '生成报告文件')}")
         except Exception:
             logger.debug("更新输出格式提示失败")
     
@@ -531,6 +581,11 @@ class HandlersMixin:
                 'ai_api_key': self.ai_api_key.get().strip() if hasattr(self, 'ai_api_key') else '',
                 'ai_base_url': self.ai_base_url.get().strip() if hasattr(self, 'ai_base_url') else '',
             }
+            self._cancel_event = threading.Event()
+            self._generation_started_at = time.monotonic()
+            self._last_scan_progress_percent = -1
+            self._update_task_summary(self._cached_params)
+            self._save_preferences(self._cached_params)
 
             # 使用线程启动，避免阻塞UI
             thread = threading.Thread(target=self._run_git2logs_direct, daemon=True)
@@ -556,9 +611,14 @@ class HandlersMixin:
             result = self._service.generate_report(
                 report_params,
                 self._service_log_callback,
+                progress_callback=self._update_generate_progress,
+                cancel_event=self._cancel_event,
             )
             self._apply_generate_report_result(result, params, report_params)
 
+        except OperationCancelled:
+            self.log("已取消生成，未写入报告文件", "warning")
+            self._show_toast("已取消生成", "warning")
         except GitLabConnectionError as e:
             self.log(f"连接 GitLab 失败: {e}", "error")
             self.root.after(0, lambda: messagebox.showerror("错误", f"连接 GitLab 失败: {e}"))
@@ -572,6 +632,85 @@ class HandlersMixin:
         finally:
             self._detach_gui_log_handler(gui_handler)
             self._reset_button_state()
+
+    def _open_path(self, path):
+        try:
+            if sys.platform == "darwin":
+                subprocess.Popen(["open", path])
+            elif sys.platform == "win32":
+                os.startfile(path)
+            else:
+                subprocess.Popen(["xdg-open", path])
+        except OSError as exc:
+            messagebox.showerror("错误", f"无法打开: {exc}")
+
+    def _preview_output(self, path):
+        if not path.lower().endswith((".md", ".html")):
+            self._open_path(path)
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as file:
+                content = file.read()
+        except OSError as exc:
+            messagebox.showerror("错误", f"无法预览: {exc}")
+            return
+        window = ctk.CTkToplevel(self.root)
+        window.title(f"预览 - {os.path.basename(path)}")
+        window.geometry("760x560")
+        text = ctk.CTkTextbox(window, wrap="word")
+        text.pack(fill="both", expand=True, padx=12, pady=12)
+        text.insert("1.0", content)
+        text.configure(state="disabled")
+
+    def _show_result_summary(self, result, report_params):
+        files = list((result.get("generated_files") or {}).values())
+        files = [path for path in files if path]
+        if not files:
+            return
+        project_count = len(result.get("all_results") or {})
+        commit_count = sum(len(item.get("commits") or []) for item in (result.get("all_results") or {}).values())
+        elapsed = time.monotonic() - getattr(self, "_generation_started_at", time.monotonic())
+        scan_summary = result.get("scan_summary") or {}
+        failed_count = scan_summary.get("failed", 0)
+        branches_scanned = scan_summary.get("branches_scanned", 0)
+        branches_skipped = scan_summary.get("branches_skipped", 0)
+
+        def render():
+            self._result_title.configure(text="生成完成")
+            suffix = f" · {failed_count} 个项目失败" if failed_count else ""
+            self._result_details.configure(
+                text=(
+                    f"{project_count} 个项目 · {commit_count} 条提交 · "
+                    f"{branches_scanned} 个分支（预过滤 {branches_skipped}）· {elapsed:.1f} 秒{suffix}"
+                ),
+            )
+            for child in self._result_actions.winfo_children():
+                child.destroy()
+            primary = files[0]
+            actions = (
+                ("预览", lambda: self._preview_output(primary)),
+                ("打开文件", lambda: self._open_path(primary)),
+                ("打开目录", lambda: self._open_path(os.path.dirname(primary))),
+                ("复制路径", lambda: self.root.clipboard_append(primary)),
+            )
+            for text, command in actions:
+                ctk.CTkButton(
+                    self._result_actions,
+                    text=text,
+                    width=88,
+                    height=26,
+                    font=self.styles.fonts["caption"](),
+                    fg_color=self.styles.colors["bg_card"],
+                    text_color=self.styles.colors["text_primary"],
+                    hover_color=self.styles.colors["hover"],
+                    border_width=1,
+                    border_color=self.styles.colors["border"],
+                    command=command,
+                ).pack(side="left", padx=(0, 8))
+            self._result_card.pack(fill="x", padx=20, pady=(0, 8), before=self._log_card)
+            self._show_toast("日报已生成", "success")
+
+        self.root.after(0, render)
 
     def _reset_button_state(self, button_name="generate_btn"):
         """安全地重置按钮状态（线程安全）

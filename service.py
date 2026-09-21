@@ -11,6 +11,8 @@ import os
 import json
 import logging
 import traceback
+import time
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -21,6 +23,7 @@ from gitlab_client import (
     group_commits_by_date,
     extract_gitlab_url,
     parse_project_identifier,
+    retry_gitlab_call,
 )
 from report_generator import (
     generate_markdown_log,
@@ -38,6 +41,7 @@ from models import (
     AIParams,
     ExcelParams,
     Git2LogsError,
+    OperationCancelled,
     GitLabConnectionError,
     ReportGenerationError,
     AIAnalysisError,
@@ -64,7 +68,7 @@ class Git2LogsService:
                 logger.debug("日志回调执行失败")
 
     @staticmethod
-    def _resolve_output_file(output_path, report_type, since_date=None, until_date=None):
+    def _resolve_output_file(output_path, report_type, since_date=None, until_date=None, suffix=".md"):
         """根据输出路径和报告类型，确定最终文件路径。"""
         if since_date and until_date and since_date == until_date:
             date_prefix = since_date
@@ -75,7 +79,7 @@ class Git2LogsService:
             output_path = os.getcwd()
 
         if os.path.isdir(output_path):
-            return os.path.join(output_path, f"{date_prefix}_{report_type}.md")
+            return os.path.join(output_path, f"{date_prefix}_{report_type}{suffix}")
 
         return output_path
 
@@ -83,7 +87,13 @@ class Git2LogsService:
     # 核心工作流：报告生成
     # ------------------------------------------------------------------
 
-    def generate_report(self, params: ReportParams, log_callback=None) -> dict:
+    def generate_report(
+        self,
+        params: ReportParams,
+        log_callback=None,
+        progress_callback=None,
+        cancel_event=None,
+    ) -> dict:
         """
         主报告生成工作流。
 
@@ -101,8 +111,16 @@ class Git2LogsService:
             ReportGenerationError: 报告生成失败
         """
         self._log(log_callback, "开始生成日志...", "info")
+        started_at = time.monotonic()
 
-        all_results = self.fetch_commits(params, log_callback=log_callback)
+        self._report_progress(progress_callback, "scan", 0, 0, "")
+        all_results = self.fetch_commits(
+            params,
+            log_callback=log_callback,
+            progress_callback=progress_callback,
+            cancel_event=cancel_event,
+        )
+        self._raise_if_cancelled(cancel_event)
 
         if not all_results:
             self._log(log_callback, "未找到任何提交记录", "warning")
@@ -112,16 +130,19 @@ class Git2LogsService:
                 'generated_files': {},
                 'work_hours_data': None,
                 'all_results': {},
+                'scan_summary': getattr(self, '_last_scan_summary', {}),
             }
 
         # 3. 根据输出格式生成报告
         try:
+            self._report_progress(progress_callback, "generate", 0, 0, "")
             result = self._build_report(all_results, params, log_callback)
         except Exception as exc:
             raise ReportGenerationError(f"报告生成失败: {exc}") from exc
 
         result['all_results'] = all_results
-        self._log(log_callback, "生成完成！", "success")
+        result['scan_summary'] = getattr(self, '_last_scan_summary', {})
+        self._log(log_callback, f"生成完成！耗时 {time.monotonic() - started_at:.2f} 秒", "success")
         return result
 
     # ------------------------------------------------------------------
@@ -134,6 +155,8 @@ class Git2LogsService:
         log_callback=None,
         *,
         strict_single_project: bool = False,
+        progress_callback=None,
+        cancel_event=None,
     ) -> dict:
         """
         连接 GitLab 并拉取提交（不生成报告文件）。
@@ -153,23 +176,43 @@ class Git2LogsService:
             params,
             log_callback,
             strict_single_project=strict_single_project,
+            progress_callback=progress_callback,
+            cancel_event=cancel_event,
         )
 
-    def _fetch_commits(self, gl, params: ReportParams, log_callback=None, *, strict_single_project: bool = False):
+    def _fetch_commits(
+        self,
+        gl,
+        params,
+        log_callback=None,
+        *,
+        strict_single_project: bool = False,
+        progress_callback=None,
+        cancel_event=None,
+    ):
         """根据 params 中的模式获取提交记录，返回 all_results 字典。"""
         all_results = {}
 
         if params.scan_all or not params.repo_url:
             self._log(log_callback, "正在扫描所有项目...", "info")
+            scan_summary = {}
             all_results = scan_all_projects(
                 gl, params.author,
                 since_date=params.since_date,
                 until_date=params.until_date,
                 branch=params.branch,
+                progress_callback=lambda completed, total, project: self._report_progress(
+                    progress_callback, "scan", completed, total, project,
+                ),
+                cancel_event=cancel_event,
+                scan_summary=scan_summary,
             )
+            self._last_scan_summary = scan_summary
             self._log(
                 log_callback,
-                f"扫描完成，共在 {len(all_results)} 个项目中找到提交记录",
+                f"扫描完成：命中 {scan_summary['success']}，无提交 {scan_summary['empty']}，"
+                f"跳过/失败 {scan_summary['skipped']}/{scan_summary['failed']}，"
+                f"分支扫描/预过滤 {scan_summary['branches_scanned']}/{scan_summary['branches_skipped']}",
                 "success" if all_results else "warning",
             )
         else:
@@ -177,8 +220,27 @@ class Git2LogsService:
                 gl, params, log_callback,
                 strict=strict_single_project,
             )
+            self._last_scan_summary = {
+                "total": 1,
+                "success": int(bool(all_results)),
+                "empty": int(not all_results),
+                "skipped": 0,
+                "failed": 0,
+                "branches_scanned": int(bool(params.branch)),
+                "branches_skipped": 0,
+            }
 
         return all_results
+
+    @staticmethod
+    def _raise_if_cancelled(cancel_event):
+        if cancel_event and cancel_event.is_set():
+            raise OperationCancelled("已取消生成")
+
+    @staticmethod
+    def _report_progress(callback, stage, completed, total, current):
+        if callback:
+            callback(stage, completed, total, current)
 
     def _fetch_single_project(self, gl, params: ReportParams, log_callback=None, *, strict: bool = False):
         """单项目模式：解析 URL → 获取项目 → 获取提交。"""
@@ -194,7 +256,10 @@ class Git2LogsService:
         self._log(log_callback, f"正在获取项目: {project_identifier}", "info")
 
         try:
-            project = gl.projects.get(project_identifier)
+            project = retry_gitlab_call(
+                lambda: gl.projects.get(project_identifier),
+                f"获取项目 {project_identifier}",
+            )
             commits = get_commits_by_author(
                 project, params.author,
                 since_date=params.since_date,
@@ -240,6 +305,9 @@ class Git2LogsService:
         if fmt == "statistics":
             return self._build_statistics(all_results, params, log_callback)
 
+        if fmt in ("html", "png"):
+            return self._build_rendered_report(all_results, params, log_callback)
+
         report_content = self._generate_single_format(
             fmt, all_results, author, since, until, branch, params.daily_hours, log_callback,
         )
@@ -265,11 +333,59 @@ class Git2LogsService:
             result['work_hours_data'] = work_hours_data
 
             json_file = output_file.replace(".md", "_data.json")
-            with open(json_file, "w", encoding="utf-8") as jf:
-                json.dump(work_hours_data, jf, ensure_ascii=False, indent=2)
+            self._write_file(
+                json_file,
+                json.dumps(work_hours_data, ensure_ascii=False, indent=2),
+            )
             self._log(log_callback, f"工时数据已保存: {json_file}", "info")
 
         return result
+
+    def _build_rendered_report(self, all_results, params, log_callback=None):
+        """将日报渲染为 HTML 或 PNG。"""
+        from report_html import generate_html_report, parse_daily_report
+
+        fmt = params.output_format
+        output_file = self._resolve_output_file(
+            params.output_path,
+            "daily_report",
+            params.since_date,
+            params.until_date,
+            suffix=f".{fmt}",
+        )
+        markdown_file = f"{output_file}.source.md"
+        html_file = f"{output_file}.source.html"
+        rendered_file = f"{output_file}.tmp.png" if fmt == "png" else html_file
+        content = generate_daily_report(
+            all_results,
+            params.author,
+            since_date=params.since_date,
+            until_date=params.until_date,
+            branch=params.branch,
+        )
+
+        try:
+            self._write_file(markdown_file, content)
+            generate_html_report(parse_daily_report(markdown_file), html_file)
+            if fmt == "png":
+                from image_converter import convert_html_to_image
+                if not convert_html_to_image(html_file, rendered_file):
+                    raise ReportGenerationError("PNG 生成失败，请确认已安装 Chrome 或 Playwright Chromium")
+            else:
+                rendered_file = html_file
+            os.replace(rendered_file, output_file)
+        finally:
+            for temporary_file in (markdown_file, html_file, rendered_file):
+                if temporary_file and os.path.exists(temporary_file):
+                    os.remove(temporary_file)
+
+        self._log(log_callback, f"报告已保存: {output_file}", "success")
+        return {
+            'content': content,
+            'output_file': output_file,
+            'generated_files': {fmt: output_file},
+            'work_hours_data': None,
+        }
 
     def _generate_single_format(self, fmt, all_results, author, since, until, branch, daily_hours, log_callback=None):
         """生成单一格式的 Markdown 内容，返回字符串或 None。"""
@@ -595,6 +711,20 @@ class Git2LogsService:
     @staticmethod
     def _write_file(path, content):
         """确保父目录存在后写入文件。"""
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        with open(path, 'w', encoding='utf-8') as f:
-            f.write(content)
+        destination = Path(path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                "w",
+                encoding="utf-8",
+                dir=destination.parent,
+                prefix=f".{destination.name}.",
+                delete=False,
+            ) as temp_file:
+                temp_path = temp_file.name
+                temp_file.write(content)
+            os.replace(temp_path, destination)
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                os.remove(temp_path)

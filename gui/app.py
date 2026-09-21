@@ -215,6 +215,7 @@ class Git2LogsGUI(
                     self._create_tab3_ai_analysis()
                     self._create_tab4_excel_export()
                     self._create_bottom_actions()
+                    self._load_preferences()
                     # 侧边栏（Tab内容建立后创建，确保 tab_frames 存在）
                     self._create_sidebar(self._sidebar_frame)
 

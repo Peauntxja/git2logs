@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import logging
 import math
+import os
+import tempfile
 from copy import copy
 from pathlib import Path
 
@@ -402,7 +404,22 @@ def fill_excel_template(
                         15 * (val.count("\n") + 1),
                     )
 
-    wb.save(output_path)
+    destination = Path(output_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            suffix=".xlsx",
+            dir=destination.parent,
+            delete=False,
+        ) as temp_file:
+            temp_path = temp_file.name
+        wb.save(temp_path)
+        os.replace(temp_path, destination)
+    finally:
+        wb.close()
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
     logger.info("Excel 导出完成：%s（共 %d 行）", output_path, len(tasks))
     return len(tasks)
 
