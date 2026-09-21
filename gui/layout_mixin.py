@@ -229,6 +229,32 @@ class LayoutMixin:
             command=self._toggle_log_collapsed,
         )
         self._log_toggle_btn.pack(side="right")
+
+        self._result_card = ctk.CTkFrame(
+            log_container,
+            fg_color=self.styles.colors['bg_card'],
+            corner_radius=self.styles.radius['lg'],
+            border_width=1,
+            border_color=self.styles.colors['border'],
+        )
+        self._result_title = ctk.CTkLabel(
+            self._result_card,
+            text="",
+            font=self.styles.fonts['body_bold'](),
+            text_color=self.styles.colors['success'],
+            anchor="w",
+        )
+        self._result_title.pack(fill="x", padx=12, pady=(10, 2))
+        self._result_details = ctk.CTkLabel(
+            self._result_card,
+            text="",
+            font=self.styles.fonts['caption'](),
+            text_color=self.styles.colors['text_secondary'],
+            anchor="w",
+        )
+        self._result_details.pack(fill="x", padx=12, pady=(0, 8))
+        self._result_actions = ctk.CTkFrame(self._result_card, fg_color="transparent")
+        self._result_actions.pack(fill="x", padx=12, pady=(0, 10))
         
         log_card = ctk.CTkFrame(log_container,
                               fg_color=self.styles.colors['bg_card'],
@@ -361,6 +387,12 @@ class LayoutMixin:
             self._log_title_lbl.configure(text_color=c['text_primary'])
         if hasattr(self, "_log_card"):
             self._log_card.configure(fg_color=c['bg_card'])
+        if hasattr(self, "_result_card"):
+            self._result_card.configure(fg_color=c['bg_card'], border_color=c['border'])
+        if hasattr(self, "_result_title"):
+            self._result_title.configure(text_color=c['success'])
+        if hasattr(self, "_result_details"):
+            self._result_details.configure(text_color=c['text_secondary'])
         if hasattr(self, "_log_text_container"):
             self._log_text_container.configure(fg_color=c['bg_main'])
         if hasattr(self, "_log_toggle_btn"):

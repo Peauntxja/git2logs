@@ -499,6 +499,7 @@ def generate_all_reports(all_results, author_name, output_dir, since_date=None, 
         dict: 生成的文件路径字典
     """
     import os
+    import tempfile
     from pathlib import Path
     from datetime import datetime
     
@@ -518,6 +519,23 @@ def generate_all_reports(all_results, author_name, output_dir, since_date=None, 
         date_prefix = datetime.now().strftime('%Y-%m-%d')
     
     generated_files = {}
+
+    def write_atomically(path, content):
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                "w",
+                encoding="utf-8",
+                dir=output_path,
+                prefix=f".{path.name}.",
+                delete=False,
+            ) as temp_file:
+                temp_path = temp_file.name
+                temp_file.write(content)
+            os.replace(temp_path, path)
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                os.remove(temp_path)
     
     # 1. 生成统计报告
     if generate_statistics:
@@ -527,8 +545,7 @@ def generate_all_reports(all_results, author_name, output_dir, since_date=None, 
                 all_results, author_name, since_date, until_date
             )
             stats_file = output_path / f"{date_prefix}_statistics.md"
-            with open(stats_file, 'w', encoding='utf-8') as f:
-                f.write(stats_content)
+            write_atomically(stats_file, stats_content)
             generated_files['statistics'] = str(stats_file)
             log(f"✓ 统计报告已保存: {stats_file}")
         except Exception as e:
@@ -544,8 +561,7 @@ def generate_all_reports(all_results, author_name, output_dir, since_date=None, 
                 all_results, author_name, since_date, until_date
             )
             daily_file = output_path / f"{date_prefix}_daily_report.md"
-            with open(daily_file, 'w', encoding='utf-8') as f:
-                f.write(daily_content)
+            write_atomically(daily_file, daily_content)
             generated_files['daily_report'] = str(daily_file)
             log(f"✓ 开发日报已保存: {daily_file}")
         except Exception as e:
@@ -555,6 +571,7 @@ def generate_all_reports(all_results, author_name, output_dir, since_date=None, 
     # 3. 生成HTML格式（需要基于日报）
     html_file = None
     if generate_html and daily_file and daily_file.exists():
+        html_temp_file = None
         try:
             log("正在生成HTML格式...")
             # 尝试导入 generate_report_image 模块
@@ -562,27 +579,36 @@ def generate_all_reports(all_results, author_name, output_dir, since_date=None, 
                 from report_html import parse_daily_report, generate_html_report
                 data = parse_daily_report(str(daily_file))
                 html_file = output_path / f"{date_prefix}_daily_report.html"
-                generate_html_report(data, str(html_file))
+                html_temp_file = output_path / f".{html_file.name}.tmp.html"
+                generate_html_report(data, str(html_temp_file))
+                os.replace(html_temp_file, html_file)
                 generated_files['html'] = str(html_file)
                 log(f"✓ HTML文件已保存: {html_file}")
             except ImportError:
                 log("⚠ 无法导入 generate_report_image 模块，跳过HTML生成")
                 generated_files['html'] = None
             except Exception as e:
+                if html_temp_file and html_temp_file.exists():
+                    html_temp_file.unlink()
                 log(f"✗ 生成HTML失败: {str(e)}")
                 generated_files['html'] = None
         except Exception as e:
+            if html_temp_file and html_temp_file.exists():
+                html_temp_file.unlink()
             log(f"✗ 生成HTML失败: {str(e)}")
             generated_files['html'] = None
     
     # 4. 生成PNG图片（需要基于HTML）
     if generate_png and html_file and html_file.exists():
+        png_temp_file = None
         try:
             log("正在生成PNG图片...")
             try:
                 from image_converter import convert_html_to_image
                 png_file = output_path / f"{date_prefix}_daily_report.png"
-                if convert_html_to_image(str(html_file), str(png_file)):
+                png_temp_file = output_path / f".{png_file.name}.tmp.png"
+                if convert_html_to_image(str(html_file), str(png_temp_file)):
+                    os.replace(png_temp_file, png_file)
                     generated_files['png'] = str(png_file)
                     log(f"✓ PNG图片已保存: {png_file}")
                 else:
@@ -592,9 +618,13 @@ def generate_all_reports(all_results, author_name, output_dir, since_date=None, 
                 log("⚠ 无法导入 generate_report_image 模块，跳过PNG生成")
                 generated_files['png'] = None
             except Exception as e:
+                if png_temp_file and png_temp_file.exists():
+                    png_temp_file.unlink()
                 log(f"✗ 生成PNG失败: {str(e)}")
                 generated_files['png'] = None
         except Exception as e:
+            if png_temp_file and png_temp_file.exists():
+                png_temp_file.unlink()
             log(f"✗ 生成PNG失败: {str(e)}")
             generated_files['png'] = None
     

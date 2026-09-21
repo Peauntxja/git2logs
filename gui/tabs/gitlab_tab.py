@@ -120,6 +120,21 @@ class GitlabTabMixin:
         scan_check.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 24))
         self._track_check_or_radio(scan_check)
         row += 1
+
+        self.show_advanced_options = ctk.BooleanVar(value=False)
+        advanced_check = ctk.CTkCheckBox(
+            content,
+            text="高级筛选",
+            variable=self.show_advanced_options,
+            font=ctk.CTkFont(size=13),
+            text_color=self.text_secondary,
+            fg_color=self.accent_color,
+            corner_radius=4,
+            command=self._toggle_advanced_options,
+        )
+        advanced_check.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 12))
+        self._track_check_or_radio(advanced_check)
+        row += 1
         
         # 分支
         branch_label = ctk.CTkLabel(content, text="分支",
@@ -127,6 +142,7 @@ class GitlabTabMixin:
                                   text_color=self.text_primary,
                                   anchor="w")
         branch_label.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        self._branch_label = branch_label
         self._track_label_primary(branch_label)
         row += 1
         
@@ -141,6 +157,7 @@ class GitlabTabMixin:
                                    fg_color=self.bg_main,
                                    text_color=self.text_primary)
         branch_entry.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 24))
+        self._branch_entry = branch_entry
         self._track_entry(branch_entry, 'main')
         row += 1
         
@@ -251,6 +268,7 @@ class GitlabTabMixin:
         ctk.CTkLabel(content, text="", height=50).grid(row=row + 1, column=0)
         
         self.tab_frames["GitLab配置"] = tab1
+        self._toggle_advanced_options()
         tab1.pack_forget()  # 初始隐藏
 
     def _bind_form_validation(self):
@@ -391,6 +409,14 @@ class GitlabTabMixin:
             self._update_field_status('repo', 'success', "已启用自动扫描所有项目")
         else:
             self._validate_repo_url()
+
+    def _toggle_advanced_options(self):
+        if self.show_advanced_options.get():
+            self._branch_label.grid()
+            self._branch_entry.grid()
+        else:
+            self._branch_label.grid_remove()
+            self._branch_entry.grid_remove()
 
 
     def _enhance_form_interaction(self):

@@ -4,7 +4,9 @@
 import json
 import logging
 import os
+import sys
 from datetime import datetime
+from pathlib import Path
 
 from tkinter import messagebox
 
@@ -20,6 +22,53 @@ class ServiceBridgeMixin:
     def _service_log_callback(self, message, level="info"):
         """Git2LogsService 日志回调（线程安全）。"""
         self.log(message, level)
+
+    @staticmethod
+    def _preferences_path():
+        if sys.platform == "darwin":
+            base = Path.home() / "Library" / "Application Support" / "MIZUKI-TOOLBOX"
+        else:
+            base = Path.home() / ".mizuki-toolbox"
+        return base / "preferences.json"
+
+    def _save_preferences(self, params):
+        preferences = {
+            key: params[key]
+            for key in (
+                "gitlab_url", "author", "repo", "branch", "use_today",
+                "since_date", "until_date", "output_format", "output_path", "scan_all",
+            )
+        }
+        try:
+            path = self._preferences_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(preferences, ensure_ascii=False), encoding="utf-8")
+        except OSError:
+            logger.debug("保存本地偏好失败")
+
+    def _load_preferences(self):
+        try:
+            preferences = json.loads(self._preferences_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return
+        fields = {
+            "gitlab_url": self.gitlab_url,
+            "author": self.author,
+            "repo": self.repo,
+            "branch": self.branch,
+            "use_today": self.use_today,
+            "since_date": self.since_date,
+            "until_date": self.until_date,
+            "output_format": self.output_format,
+            "output_path": self.output_file,
+            "scan_all": self.scan_all,
+        }
+        for key, field in fields.items():
+            if key in preferences:
+                field.set(preferences[key] if preferences[key] is not None else "")
+        if self.branch.get().strip() and hasattr(self, "show_advanced_options"):
+            self.show_advanced_options.set(True)
+            self._toggle_advanced_options()
 
     def _attach_gui_log_handler(self):
         """将 root logger 重定向到 GUI 日志面板。"""
@@ -145,6 +194,8 @@ class ServiceBridgeMixin:
         author = params['author']
         repo = params['repo']
         branch = params['branch']
+        if branch and branch.lower() in ("none", "null"):
+            branch = None
 
         self.log("配置参数:", "info")
         self.log(f"  GitLab URL: {gitlab_url}", "info")
@@ -224,13 +275,17 @@ class ServiceBridgeMixin:
             selected_projects=selected_projects or [],
         )
 
-    def _log_no_commits_troubleshooting(self, params: dict, since_date, until_date):
+    def _log_no_commits_troubleshooting(self, params: dict, since_date, until_date, scan_summary):
         """扫描全库无结果时的排查提示（与原 GUI 行为一致）。"""
         if not (params['scan_all'] or not params['repo']):
             return
         author = params['author']
-        self.log("", "warning")
-        self.log("未找到提交记录的可能原因：", "warning")
+        self.log(
+            f"扫描了 {scan_summary.get('completed', 0)} 个项目、"
+            f"{scan_summary.get('branches_scanned', 0)} 个分支，未匹配到提交。",
+            "warning",
+        )
+        self.log("建议检查：", "warning")
         self.log(
             "1. 日期范围问题：GitLab API 使用 UTC 时间，可能与本地时区不同",
             "warning",
@@ -240,31 +295,42 @@ class ServiceBridgeMixin:
             + (f"{since_date} 至 {until_date}" if since_date and until_date else "未指定（查询所有）"),
             "warning",
         )
-        self.log("2. 提交者名称不匹配：请确认提交者名称或邮箱与 GitLab 中的完全一致", "warning")
+        self.log("2. 提交者名称不匹配：请确认名称或邮箱与 GitLab 完全一致", "warning")
         self.log(f"   当前提交者: {author}", "warning")
-        self.log("   提示: 请查看上面的'调试：查询到的提交示例'，确认实际作者格式", "warning")
         self.log("3. 分支问题：如果指定了分支，请确认该分支存在且有提交", "warning")
         self.log("4. 权限问题：请确认访问令牌有足够的权限", "warning")
-        self.log("", "warning")
-        self.log("排查建议：", "info")
-        self.log("- 查看上面的调试信息，确认 GitLab 中实际提交的作者格式", "info")
-        self.log("- 尝试只使用邮箱或只使用名称作为提交者", "info")
-        self.log("- 如果指定了日期，尝试不指定日期范围（取消'今天'勾选，不填日期）", "info")
-        self.log("- 尝试指定具体分支名称", "info")
-        self.log("- 检查该日期范围内是否确实有提交（可以在 GitLab 网页上查看）", "info")
 
     def _apply_generate_report_result(self, result: dict, cached: dict, report_params: ReportParams):
         """根据 Git2LogsService.generate_report 返回值更新 GUI 状态。"""
         all_results = result.get('all_results') or {}
+        scan_summary = result.get('scan_summary') or {}
+        failed_count = scan_summary.get("failed", 0)
         if not all_results:
+            if failed_count:
+                self.log(f"{failed_count} 个项目扫描失败，未能确认是否存在提交", "error")
+                self.root.after(
+                    0,
+                    lambda: messagebox.showwarning(
+                        "扫描未完成",
+                        f"{failed_count} 个项目扫描失败，请检查网络后重试。",
+                    ),
+                )
+                return
             self.log("未找到任何提交记录", "warning")
             self._log_no_commits_troubleshooting(
                 cached,
                 report_params.since_date,
                 report_params.until_date,
+                scan_summary,
             )
             self.root.after(0, lambda: messagebox.showwarning("提示", "未找到任何提交记录"))
             return
+
+        if failed_count:
+            self.log(
+                f"已生成报告，但有 {failed_count} 个项目扫描失败，结果可能不完整",
+                "warning",
+            )
 
         work_hours_data = result.get('work_hours_data')
         if work_hours_data:
@@ -298,9 +364,8 @@ class ServiceBridgeMixin:
 
         if output_format == "work_hours" and output_file and work_hours_data:
             json_file = output_file.replace(".md", "_data.json")
-            with open(json_file, "w", encoding="utf-8") as jf:
-                json.dump(work_hours_data, jf, ensure_ascii=False, indent=2)
             self.log(f"工时数据已保存: {json_file}", "info")
             self.log("提示: 可在「Excel导出」标签页加载此 JSON 文件", "info")
 
+        self._show_result_summary(result, report_params)
         self.log("=" * 60, "info")

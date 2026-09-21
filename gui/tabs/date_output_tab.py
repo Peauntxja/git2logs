@@ -227,9 +227,8 @@ class DateOutputTabMixin:
         output_title.grid(row=0, column=0, sticky="w", padx=20, pady=(20, 16))
         self._track_label_primary(output_title)
         
-        output_label_text = "输出目录" if self.output_format.get() == "all" else "输出文件"
         self.output_label = ctk.CTkLabel(output_card,
-                                      text=output_label_text,
+                                      text="输出目录",
                                       font=ctk.CTkFont(size=14, weight="bold"),
                                       text_color=self.text_primary,
                                       anchor="w")
@@ -269,7 +268,7 @@ class DateOutputTabMixin:
         self._track_outline_button(browse_btn)
         
         self.output_hint = ctk.CTkLabel(output_card,
-                                       text="提示: 批量生成时请选择目录",
+                                       text="提示: 生成适合提交日报的 Markdown 文件",
                                        font=ctk.CTkFont(size=11),
                                        text_color=self.text_secondary,
                                        anchor="w")
