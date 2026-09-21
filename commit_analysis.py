@@ -7,7 +7,6 @@
 从 git2logs.py 拆分而来。
 """
 
-import signal
 import logging
 import functools
 import re
@@ -123,80 +122,60 @@ def get_commit_details(project, commit, timeout=GitLabConfig.COMMIT_DETAIL_TIMEO
         'web_url': getattr(commit, 'web_url', '')
     }
     
-    # 超时处理函数
-    def timeout_handler(signum, frame):
-        raise TimeoutError(f"获取commit详情超时（{timeout}秒）")
-    
     try:
-        # 设置超时（仅Unix系统）
-        if hasattr(signal, 'SIGALRM'):
-            signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(timeout)
-        
+        # 尝试获取详细的commit信息
+        detailed_commit = project.commits.get(commit.id)
+            
+        # 获取文件变更列表（限制数量和大小）
         try:
-            # 尝试获取详细的commit信息
-            detailed_commit = project.commits.get(commit.id)
-            
-            # 获取文件变更列表（限制数量和大小）
-            try:
-                if hasattr(detailed_commit, 'diff'):
-                    diffs = detailed_commit.diff()
-                    file_count = 0
-                    for diff in diffs:
-                        if file_count >= max_files:
-                            logger.debug(f"Commit {commit.id[:8]} 文件数量超过限制，仅显示前 {max_files} 个")
-                            break
+            if hasattr(detailed_commit, 'diff'):
+                diffs = detailed_commit.diff()
+                file_count = 0
+                for diff in diffs:
+                    if file_count >= max_files:
+                        logger.debug(f"Commit {commit.id[:8]} 文件数量超过限制，仅显示前 {max_files} 个")
+                        break
                         
-                        try:
-                            diff_text = getattr(diff, 'diff', '')
-                            # 限制单个diff的大小
-                            if diff_text and len(diff_text) > 10000:
-                                diff_text = diff_text[:10000] + '\n... (diff过长，已截断)'
-                            
-                            file_info = {
-                                'path': getattr(diff, 'new_path', getattr(diff, 'old_path', '')),
-                                'old_path': getattr(diff, 'old_path', ''),
-                                'new_path': getattr(diff, 'new_path', ''),
-                                'diff': diff_text[:500] if diff_text else ''  # 限制显示长度
-                            }
-                            details['changed_files'].append(file_info)
-                            file_count += 1
-                        except Exception as e:
-                            logger.debug(f"处理单个文件diff失败: {str(e)}")
-                            continue
-                    
-                    if len(diffs) > max_files:
-                        details['changed_files'].append({
-                            'path': f'... 还有 {len(diffs) - max_files} 个文件未显示',
-                            'old_path': '',
-                            'new_path': '',
-                            'diff': ''
-                        })
-            except TimeoutError:
-                logger.warning(f"获取commit {commit.id[:8]} 文件变更列表超时")
-            except Exception as e:
-                logger.debug(f"获取文件变更列表失败: {str(e)}")
-            
-            # 获取统计信息
-            try:
-                if hasattr(detailed_commit, 'stats') and detailed_commit.stats:
-                    stats = detailed_commit.stats
-                    if isinstance(stats, dict):
-                        details['stats'] = {
-                            'additions': stats.get('additions', 0),
-                            'deletions': stats.get('deletions', 0),
-                            'total': stats.get('total', 0)
+                    try:
+                        diff_text = getattr(diff, 'diff', '')
+                        # 限制单个diff的大小
+                        if diff_text and len(diff_text) > 10000:
+                            diff_text = diff_text[:10000] + '\n... (diff过长，已截断)'
+
+                        file_info = {
+                            'path': getattr(diff, 'new_path', getattr(diff, 'old_path', '')),
+                            'old_path': getattr(diff, 'old_path', ''),
+                            'new_path': getattr(diff, 'new_path', ''),
+                            'diff': diff_text[:500] if diff_text else ''  # 限制显示长度
                         }
-            except Exception as e:
-                logger.debug(f"获取统计信息失败: {str(e)}")
-        
-        finally:
-            # 取消超时
-            if hasattr(signal, 'SIGALRM'):
-                signal.alarm(0)
-    
-    except TimeoutError as e:
-        logger.warning(f"获取commit {commit.id[:8]} 详情超时: {str(e)}")
+                        details['changed_files'].append(file_info)
+                        file_count += 1
+                    except Exception as e:
+                        logger.debug(f"处理单个文件diff失败: {str(e)}")
+                        continue
+
+                if len(diffs) > max_files:
+                    details['changed_files'].append({
+                        'path': f'... 还有 {len(diffs) - max_files} 个文件未显示',
+                        'old_path': '',
+                        'new_path': '',
+                        'diff': ''
+                    })
+        except Exception as e:
+            logger.debug(f"获取文件变更列表失败: {str(e)}")
+
+        # 获取统计信息
+        try:
+            if hasattr(detailed_commit, 'stats') and detailed_commit.stats:
+                stats = detailed_commit.stats
+                if isinstance(stats, dict):
+                    details['stats'] = {
+                        'additions': stats.get('additions', 0),
+                        'deletions': stats.get('deletions', 0),
+                        'total': stats.get('total', 0)
+                    }
+        except Exception as e:
+            logger.debug(f"获取统计信息失败: {str(e)}")
     except Exception as e:
         logger.debug(f"获取详细commit信息失败: {str(e)}")
         # 降级：使用基本信息

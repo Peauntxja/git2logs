@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import tempfile
+import threading
+from types import SimpleNamespace
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -19,7 +21,7 @@ from tests.helpers.normalize import normalize_report_text
 
 from cli import build_argument_parser, cli_output_format, cli_report_type_name
 from excel_exporter import fill_excel_template, merge_and_normalize_tasks
-from models import GitLabConnectionError, ReportParams
+from models import GitLabConnectionError, OperationCancelled, ReportGenerationError, ReportParams
 from report_generator import (
     generate_daily_report,
     generate_markdown_log,
@@ -29,6 +31,14 @@ from report_generator import (
 from report_html import generate_html_report, parse_daily_report
 from service import Git2LogsService
 from work_hours import calculate_work_hours
+from gitlab_client import (
+    get_all_branches,
+    get_commits_by_author,
+    retry_gitlab_call,
+    scan_all_projects,
+)
+from commit_analysis import clear_commit_cache, get_commit_details
+from gui.service_bridge import ServiceBridgeMixin
 
 
 def _load_expected(name: str) -> str:
@@ -193,6 +203,52 @@ class ReportHtmlTests(unittest.TestCase):
         self.assertIn("16:45", html)
         self.assertLess(html.index("10:30"), html.index("16:45"))
 
+    def test_service_generates_html_daily_report(self):
+        daily_report = _load_expected("daily_report.md")
+        with tempfile.TemporaryDirectory() as tmp:
+            params = ReportParams(
+                gitlab_url="http://gitlab.example.com",
+                token="token",
+                author=AUTHOR,
+                output_format="html",
+                output_path=tmp,
+                since_date=SINCE,
+                until_date=UNTIL,
+            )
+            with mock.patch("service.generate_daily_report", return_value=daily_report):
+                result = Git2LogsService()._build_report({}, params)
+            output = Path(result["output_file"])
+            self.assertEqual(output.name, f"{SINCE}_daily_report.html")
+            self.assertTrue(output.exists())
+            self.assertFalse((Path(f"{output}.source.md")).exists())
+
+    def test_service_cancel_guard(self):
+        import threading
+
+        cancel_event = threading.Event()
+        cancel_event.set()
+        with self.assertRaises(OperationCancelled):
+            Git2LogsService._raise_if_cancelled(cancel_event)
+
+    def test_service_reports_png_renderer_failure(self):
+        daily_report = _load_expected("daily_report.md")
+        with tempfile.TemporaryDirectory() as tmp:
+            params = ReportParams(
+                gitlab_url="http://gitlab.example.com",
+                token="token",
+                author=AUTHOR,
+                output_format="png",
+                output_path=tmp,
+                since_date=SINCE,
+                until_date=UNTIL,
+            )
+            with (
+                mock.patch("service.generate_daily_report", return_value=daily_report),
+                mock.patch("image_converter.convert_html_to_image", return_value=False),
+                self.assertRaises(ReportGenerationError),
+            ):
+                Git2LogsService()._build_report({}, params)
+
 
 class CliParserTests(unittest.TestCase):
     def test_scan_all_daily_report_format_mapping(self):
@@ -249,6 +305,190 @@ class FetchCommitsTests(unittest.TestCase):
             Git2LogsService().fetch_commits(
                 self._params(), strict_single_project=True,
             )
+
+
+class ResilienceTests(unittest.TestCase):
+    def test_background_thread_gets_commit_details(self):
+        clear_commit_cache()
+        commit = SimpleNamespace(
+            id="abcdef123456",
+            message="feat: test",
+            committed_date="2026-01-01T00:00:00Z",
+            author_name="MIZUKI",
+        )
+        detailed_commit = SimpleNamespace(
+            stats={"additions": 2, "deletions": 1, "total": 3},
+            diff=lambda: [SimpleNamespace(new_path="demo.py", old_path="", diff="+line")],
+        )
+        project = SimpleNamespace(id=1, commits=SimpleNamespace(get=lambda _id: detailed_commit))
+        result = {}
+
+        thread = threading.Thread(
+            target=lambda: result.update(get_commit_details(project, commit)),
+        )
+        thread.start()
+        thread.join()
+
+        self.assertEqual(result["stats"]["total"], 3)
+        self.assertEqual(result["changed_files"][0]["path"], "demo.py")
+
+    def test_get_all_branches_paginates_beyond_one_hundred(self):
+        first_page = [mock.Mock(name=f"branch-{index}") for index in range(100)]
+        final_branch = mock.Mock(name="branch-100")
+        project = mock.Mock()
+        project.branches.list.side_effect = [first_page, [final_branch]]
+
+        branches = get_all_branches(project)
+
+        self.assertEqual(len(branches), 101)
+        self.assertEqual(project.branches.list.call_args_list[0].kwargs["page"], 1)
+        self.assertEqual(project.branches.list.call_args_list[1].kwargs["page"], 2)
+
+    def test_retryable_request_retries_then_succeeds(self):
+        response_error = RuntimeError("503 service unavailable")
+        operation = mock.Mock(side_effect=[response_error, "ok"])
+        with mock.patch("gitlab_client.time.sleep") as sleep:
+            self.assertEqual(retry_gitlab_call(operation, "测试请求"), "ok")
+        self.assertEqual(operation.call_count, 2)
+        sleep.assert_called_once()
+
+    def test_auth_error_does_not_retry(self):
+        error = RuntimeError("401 unauthorized")
+        operation = mock.Mock(side_effect=error)
+        with mock.patch("gitlab_client.time.sleep") as sleep:
+            with self.assertRaises(RuntimeError):
+                retry_gitlab_call(operation, "测试请求")
+        self.assertEqual(operation.call_count, 1)
+        sleep.assert_not_called()
+
+    def test_rate_limit_uses_retry_after_header(self):
+        error = RuntimeError("too many requests")
+        error.response_code = 429
+        error.headers = {"Retry-After": "1.5"}
+        operation = mock.Mock(side_effect=[error, "ok"])
+        with (
+            mock.patch("gitlab_client._rate_limit_until", 0),
+            mock.patch("gitlab_client.time.sleep") as sleep,
+        ):
+            self.assertEqual(retry_gitlab_call(operation, "测试请求"), "ok")
+        sleep.assert_called_once_with(1.5)
+
+    def test_shared_rate_limit_waits_before_request(self):
+        with (
+            mock.patch("gitlab_client._rate_limit_until", 12),
+            mock.patch("gitlab_client.time.monotonic", return_value=10),
+            mock.patch("gitlab_client.time.sleep") as sleep,
+        ):
+            self.assertEqual(retry_gitlab_call(lambda: "ok", "测试请求"), "ok")
+        sleep.assert_called_once_with(2)
+
+    def test_all_branch_scan_deduplicates_as_it_collects(self):
+        shared = SimpleNamespace(id="shared")
+        first = SimpleNamespace(id="first")
+        second = SimpleNamespace(id="second")
+        project = mock.Mock()
+        project.branches.list.return_value = [
+            SimpleNamespace(name="main"),
+            SimpleNamespace(name="develop"),
+        ]
+        project.commits.list.side_effect = lambda **params: {
+            "main": [shared, first],
+            "develop": [shared, second],
+        }[params["ref_name"]]
+
+        commits = get_commits_by_author(project, AUTHOR)
+
+        self.assertEqual([commit.id for commit in commits], ["shared", "first", "second"])
+
+    @mock.patch("gitlab_client.get_commits_by_author")
+    @mock.patch("gitlab_client.get_all_projects")
+    def test_scan_summary_keeps_partial_failures(
+        self,
+        mock_get_all_projects,
+        mock_get_commits,
+    ):
+        first = mock.Mock(path_with_namespace="group/first")
+        second = mock.Mock(path_with_namespace="group/second")
+        mock_get_all_projects.return_value = [first, second]
+        mock_get_commits.side_effect = [RuntimeError("503 service unavailable"), []]
+        summary = {}
+
+        result = scan_all_projects(mock.Mock(), AUTHOR, scan_summary=summary)
+
+        self.assertEqual(result, {})
+        self.assertEqual(summary["failed"], 1)
+        self.assertEqual(summary["empty"], 1)
+
+    @mock.patch("gitlab_client.get_all_projects")
+    def test_scan_summary_collects_branch_metrics(self, mock_get_all_projects):
+        project = mock.Mock(path_with_namespace="group/project")
+        mock_get_all_projects.return_value = [project]
+        summary = {}
+
+        def get_commits(*_args, scan_metrics=None, **_kwargs):
+            scan_metrics.update({"branches_scanned": 3, "branches_skipped": 1})
+            return []
+
+        with mock.patch("gitlab_client.get_commits_by_author", side_effect=get_commits):
+            scan_all_projects(mock.Mock(), AUTHOR, scan_summary=summary)
+
+        self.assertEqual(summary["branches_scanned"], 3)
+        self.assertEqual(summary["branches_skipped"], 1)
+
+    @mock.patch("gitlab_client.get_all_projects")
+    def test_cancelled_scan_does_not_submit_later_projects(self, mock_get_all_projects):
+        projects = [mock.Mock(path_with_namespace=f"group/project-{index}") for index in range(3)]
+        mock_get_all_projects.return_value = projects
+        cancel_event = threading.Event()
+        scanned_projects = []
+
+        def get_commits(project, *_args, **_kwargs):
+            scanned_projects.append(project.path_with_namespace)
+            cancel_event.set()
+            return []
+
+        with mock.patch("gitlab_client.get_commits_by_author", side_effect=get_commits):
+            summary = {}
+            scan_all_projects(
+                mock.Mock(),
+                AUTHOR,
+                max_workers=1,
+                cancel_event=cancel_event,
+                scan_summary=summary,
+            )
+
+        self.assertEqual(scanned_projects, ["group/project-0"])
+        self.assertTrue(summary["cancelled"])
+
+    def test_atomic_write_preserves_existing_file_on_replace_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "report.md"
+            target.write_text("old", encoding="utf-8")
+            with mock.patch("service.os.replace", side_effect=OSError("disk error")):
+                with self.assertRaises(OSError):
+                    Git2LogsService._write_file(target, "new")
+            self.assertEqual(target.read_text(encoding="utf-8"), "old")
+
+
+class GuiParameterTests(unittest.TestCase):
+    def test_saved_none_branch_does_not_become_branch_name(self):
+        bridge = ServiceBridgeMixin()
+        bridge.log = mock.Mock()
+        bridge._resolve_dates_from_cached = mock.Mock(return_value=(SINCE, UNTIL))
+        params = {
+            "gitlab_url": "http://gitlab.example.com",
+            "token": "token",
+            "author": AUTHOR,
+            "repo": "",
+            "branch": "None",
+            "output_path": "",
+            "scan_all": True,
+            "output_format": "daily_report",
+        }
+
+        report_params = bridge._build_report_params(params)
+
+        self.assertIsNone(report_params.branch)
 
 
 class CommitAnalysisTests(unittest.TestCase):
