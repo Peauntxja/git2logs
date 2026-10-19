@@ -37,6 +37,7 @@ class ServiceBridgeMixin:
             for key in (
                 "gitlab_url", "author", "repo", "branch", "use_today",
                 "since_date", "until_date", "output_format", "output_path", "scan_all",
+                "polish_enabled", "polish_model",
             )
         }
         try:
@@ -62,10 +63,15 @@ class ServiceBridgeMixin:
             "output_format": self.output_format,
             "output_path": self.output_file,
             "scan_all": self.scan_all,
+            "polish_enabled": getattr(self, "polish_enabled", None),
+            "polish_model": getattr(self, "polish_model", None),
         }
         for key, field in fields.items():
-            if key in preferences:
-                field.set(preferences[key] if preferences[key] is not None else "")
+            if field is None or key not in preferences:
+                continue
+            field.set(preferences[key] if preferences[key] is not None else "")
+        if preferences.get("polish_enabled") and hasattr(self, "toggle_polish_config"):
+            self.toggle_polish_config()
         if self.branch.get().strip() and hasattr(self, "show_advanced_options"):
             self.show_advanced_options.set(True)
             self._toggle_advanced_options()
@@ -225,6 +231,20 @@ class ServiceBridgeMixin:
         output_format = params['output_format']
         self.log(f"输出格式: {output_format}", "info")
 
+        polish_enabled = bool(params.get('polish_enabled'))
+        polish_api_key = (params.get('polish_api_key') or '').strip() or None
+        polish_model = (params.get('polish_model') or '').strip() or 'deepseek-v4-pro'
+        polish_formats = {'daily_report', 'html', 'png', 'all'}
+        if polish_enabled and output_format in polish_formats and not polish_api_key:
+            self.log("错误: 已开启 AI 润色，请填写 DeepSeek API Key", "error")
+            self.root.after(
+                0,
+                lambda: messagebox.showerror("错误", "已开启 AI 润色，请填写 DeepSeek API Key"),
+            )
+            return None
+        if polish_enabled and output_format in polish_formats:
+            self.log(f"AI 润色: DeepSeek / {polish_model}", "info")
+
         return ReportParams(
             gitlab_url=gitlab_url,
             token=token,
@@ -237,6 +257,9 @@ class ServiceBridgeMixin:
             scan_all=scan_all,
             repo_url=repo or None,
             daily_hours=ReportConfig.DEFAULT_DAILY_HOURS,
+            polish_enabled=polish_enabled,
+            polish_api_key=polish_api_key,
+            polish_model=polish_model,
         )
 
     def _build_ai_params(self, cached: dict | None = None) -> AIParams:

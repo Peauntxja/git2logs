@@ -478,7 +478,7 @@ def generate_statistics_report(all_results, author_name, since_date=None, until_
 
 def generate_all_reports(all_results, author_name, output_dir, since_date=None, until_date=None, 
                          generate_statistics=True, generate_daily=True, generate_html=True, 
-                         generate_png=True, logger_func=None):
+                         generate_png=True, logger_func=None, polish_map=None):
     """
     批量生成所有格式的报告
     
@@ -557,7 +557,7 @@ def generate_all_reports(all_results, author_name, output_dir, since_date=None, 
         try:
             log("正在生成开发日报...")
             daily_content = generate_daily_report(
-                all_results, author_name, since_date, until_date
+                all_results, author_name, since_date, until_date, polish_map=polish_map,
             )
             daily_file = output_path / f"{date_prefix}_daily_report.md"
             write_atomically(daily_file, daily_content)
@@ -854,8 +854,8 @@ def _manual_task_blocks(start):
     return "".join(lines)
 
 
-def generate_daily_report(all_results, author_name, since_date=None, until_date=None, branch=None):
-    """生成分类日报：代码开发自动填充，其余分类默认为无。"""
+def generate_daily_report(all_results, author_name, since_date=None, until_date=None, branch=None, polish_map=None):
+    """生成分类日报：代码开发自动填充，其余分类默认为无。polish_map 可选注入 AI 润色。"""
     lines = []
     since_date = _normalize_report_date(since_date)
     until_date = _normalize_report_date(until_date)
@@ -906,14 +906,21 @@ def generate_daily_report(all_results, author_name, since_date=None, until_date=
         lines.append(_manual_task_blocks(2))
         return ''.join(lines)
 
+    polish_map = polish_map or {}
     for index, (project_path, name, commits) in enumerate(groups, 1):
+        polished = polish_map.get(project_path) or {}
+        task_type = (polished.get("task_type") or "代码开发").strip() or "代码开发"
+        task_output = (polished.get("task_output") or "").strip()
         lines.append(f"{_cn_ordinal(index)}、{name}\n")
-        lines.append("任务类型：代码开发\n")
+        lines.append(f"任务类型：{task_type}\n")
         lines.append(f"任务用时：{_format_task_hours(hours_by_project.get(project_path, 0))}\n")
         lines.append("任务产出：\n")
-        for task_index, (_time, _repo, _ref, _cid, subject) in enumerate(commits, 1):
-            if subject:
-                lines.append(f"{task_index}. {subject}\n")
+        if task_output:
+            lines.append(f"{task_output}\n")
+        else:
+            for task_index, (_time, _repo, _ref, _cid, subject) in enumerate(commits, 1):
+                if subject:
+                    lines.append(f"{task_index}. {subject}\n")
         lines.append("\n| 仓库地址 | 分支名称 | Commit ID |\n")
         lines.append("| --- | --- | --- |\n")
         for _time, repo, ref, commit_id, _subject in commits:

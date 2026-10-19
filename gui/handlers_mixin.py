@@ -371,6 +371,15 @@ class HandlersMixin:
                 self.ai_config_frame.grid_remove()
         except Exception:
             logger.debug("切换AI配置区域显示失败")
+
+    def toggle_polish_config(self):
+        try:
+            if self.polish_enabled.get():
+                self.polish_config_frame.grid()
+            else:
+                self.polish_config_frame.grid_remove()
+        except Exception:
+            logger.debug("切换AI润色配置显示失败")
     
     def toggle_date_inputs(self):
         """切换日期输入框的启用/禁用状态"""
@@ -580,6 +589,9 @@ class HandlersMixin:
                 'ai_model': self.ai_model.get() if hasattr(self, 'ai_model') else '',
                 'ai_api_key': self.ai_api_key.get().strip() if hasattr(self, 'ai_api_key') else '',
                 'ai_base_url': self.ai_base_url.get().strip() if hasattr(self, 'ai_base_url') else '',
+                'polish_enabled': self.polish_enabled.get() if hasattr(self, 'polish_enabled') else False,
+                'polish_model': self.polish_model.get() if hasattr(self, 'polish_model') else 'deepseek-v4-pro',
+                'polish_api_key': self.polish_api_key.get().strip() if hasattr(self, 'polish_api_key') else '',
             }
             self._cancel_event = threading.Event()
             self._generation_started_at = time.monotonic()
