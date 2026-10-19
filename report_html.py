@@ -21,6 +21,35 @@ def parse_daily_report(file_path):
     is_daily_report = '**日期**:' in content or '✨ 功能开发:' in content
     is_all_projects = '所有项目提交汇总日志' in content or '**涉及项目数**:' in content
     
+    if is_daily_report and '任务类型：代码开发' in content:
+        date_match = re.search(r'\*\*日期\*\*: (.*?)(?:\s*\(|$)', content, re.M)
+        date = date_match.group(1).strip() if date_match else ''
+        projects = {}
+        commits_count = 0
+        for line in content.splitlines():
+            if not line.startswith('|'):
+                continue
+            cells = [c.strip() for c in line.strip().strip('|').split('|')]
+            if len(cells) < 3 or cells[0] in ('仓库地址',) or set(cells[0]) <= set('-: '):
+                continue
+            repo = cells[0]
+            name = repo.rstrip('/').rsplit('/', 1)[-1]
+            if name.endswith('.git'):
+                name = name[:-4]
+            item = projects.setdefault(repo, {'name': name, 'path': repo, 'commits': 0})
+            item['commits'] += 1
+            commits_count += 1
+        return {
+            'date': date,
+            'projects_count': len(projects),
+            'commits_count': commits_count,
+            'work_time': '',
+            'feat_count': 0,
+            'bug_count': 0,
+            'projects': list(projects.values()),
+            'timeline': [],
+        }
+
     if is_daily_report:
         # 解析日报格式
         date_match = re.search(r'\*\*日期\*\*: (.*?)(?:\s*\(|$)', content, re.M)

@@ -507,6 +507,7 @@ def get_commits_by_author(
                     for commit in branch_commits:
                         if commit.id not in seen_ids:
                             seen_ids.add(commit.id)
+                            commit.ref_name = branch_obj.name
                             unique_commits.append(commit)
                     # 如果在优先分支中找到提交，标记一下（但不跳过其他分支，确保不遗漏）
                     if branch_obj in priority_branches:
