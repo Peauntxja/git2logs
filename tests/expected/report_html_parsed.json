@@ -1,27 +1,16 @@
 {
-  "bug_count": 1,
+  "bug_count": 0,
   "commits_count": 2,
-  "date": "2026年1月15日",
-  "feat_count": 1,
+  "date": "<NORMALIZED>",
+  "feat_count": 0,
   "projects": [
     {
       "commits": 2,
-      "name": "Demo Project",
-      "path": "demo/project-a"
+      "name": "project-a",
+      "path": "https://gitlab.example.com/demo/project-a.git"
     }
   ],
   "projects_count": 1,
-  "timeline": [
-    {
-      "project": "Demo Project",
-      "time": "16:45",
-      "type": "🐛"
-    },
-    {
-      "project": "Demo Project",
-      "time": "10:30",
-      "type": "✨"
-    }
-  ],
-  "work_time": "10:30 - 16:45"
+  "timeline": [],
+  "work_time": ""
 }

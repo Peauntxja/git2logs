@@ -199,9 +199,8 @@ class ReportHtmlTests(unittest.TestCase):
             out = Path(tmp) / "daily.html"
             generate_html_report(data, str(out))
             html = out.read_text(encoding="utf-8")
-        self.assertIn("10:30", html)
-        self.assertIn("16:45", html)
-        self.assertLess(html.index("10:30"), html.index("16:45"))
+        self.assertIn("project-a", html)
+        self.assertIn("2 次", html)
 
     def test_service_generates_html_daily_report(self):
         daily_report = _load_expected("daily_report.md")
@@ -399,6 +398,7 @@ class ResilienceTests(unittest.TestCase):
         commits = get_commits_by_author(project, AUTHOR)
 
         self.assertEqual([commit.id for commit in commits], ["shared", "first", "second"])
+        self.assertEqual([commit.ref_name for commit in commits], ["main", "main", "develop"])
 
     @mock.patch("gitlab_client.get_commits_by_author")
     @mock.patch("gitlab_client.get_all_projects")

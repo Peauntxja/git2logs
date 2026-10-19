@@ -28,14 +28,13 @@ from utils.date_utils import (
 )
 from config import ReportConfig
 from commit_analysis import (
-    analyze_commit_type, get_commit_details,
-    calculate_code_statistics, get_commit_display_info,
+    get_commit_details,
+    calculate_code_statistics,
     is_merge_commit,
 )
 from work_hours import (
     calculate_work_hours,
     format_work_hours_table,
-    format_work_hours_project_summary,
 )
 
 logger = logging.getLogger(__name__)
@@ -800,322 +799,127 @@ def _clean_commit_subject(message: str) -> str:
     return cleaned or first
 
 
-def _build_daily_theme_summary(project_commits):
-    """按项目生成可读主题句（取前几条 subject，非模板化「涉及 xx 模块」）。"""
-    theme_lines = []
-    for project_path in sorted(project_commits.keys()):
-        info = project_commits[project_path]
-        name = info["project"].name
-        commits = info["commits"]
-        if not commits:
-            continue
-        subjects = []
-        for item in commits:
-            subj = _clean_commit_subject(item["commit"].message or "")
-            if subj and subj not in subjects:
-                subjects.append(subj)
-        preview = "；".join(subjects[:2])
-        if len(subjects) > 2:
-            preview += f" 等{len(subjects)}项"
-        theme_lines.append(f"**{name}**（{len(commits)} 次）：{preview}")
-    return theme_lines
+def _repo_clone_url(project):
+    url = (getattr(project, 'http_url_to_repo', '') or getattr(project, 'web_url', '') or '').rstrip('/')
+    if url and not url.endswith('.git') and '/-/' not in url:
+        url += '.git'
+    return url
 
 
-def _format_commit_body_excerpt(full_message, commit_type, max_lines=3):
-    """仅对功能/修复/性能类提交输出有限行 body 摘要。"""
-    body_types = {'功能开发', 'Bug修复', '性能优化'}
-    if commit_type not in body_types or not full_message or '\n' not in full_message:
-        return None
-    filtered_lines = [
-        line for line in full_message.split('\n')
-        if not line.strip().lower().startswith('made-with:')
-    ]
-    filtered_message = '\n'.join(filtered_lines).strip()
-    if not filtered_message or '\n' not in filtered_message:
-        return None
-    parts = [line for line in filtered_message.split('\n') if line.strip()]
-    body_lines = parts[1:1 + max_lines]
-    if not body_lines:
-        return None
-    if len(parts) > 1 + max_lines:
-        body_lines = body_lines[:]
-        body_lines[-1] = body_lines[-1].rstrip() + ' …'
-    return '\n   '.join(body_lines)
+def _format_task_hours(hours):
+    if hours is None:
+        return ''
+    rounded = round(float(hours), 1)
+    if abs(rounded - round(rounded)) < 0.05:
+        return f"{int(round(rounded))}小时"
+    return f"{rounded:.1f}小时"
+
+
+def _hours_by_project(all_results, since_date, until_date, branch):
+    try:
+        data = calculate_work_hours(all_results, since_date, until_date, branch=branch)
+    except Exception as e:
+        logger.warning(f"日报工时计算失败: {e}")
+        return {}
+    totals = {}
+    for day in (data or {}).values():
+        for path, project in day.get('projects', {}).items():
+            totals[path] = totals.get(path, 0) + project.get('total_hours', 0)
+    return totals
+
+
+def _cn_ordinal(n):
+    digits = "一二三四五六七八九"
+    if 1 <= n <= 9:
+        return digits[n - 1]
+    if n == 10:
+        return "十"
+    if 11 <= n <= 19:
+        return "十" + digits[n - 11]
+    return str(n)
+
+
+def _manual_task_blocks(start):
+    blocks = (
+        ("文档编写", "文档编写"),
+        ("会议讨论", "会议讨论"),
+        ("其他事项", "无"),
+    )
+    lines = []
+    for offset, (title, task_type) in enumerate(blocks):
+        lines.append(f"{_cn_ordinal(start + offset)}、{title}\n")
+        lines.append(f"任务类型：{task_type}\n")
+        lines.append("任务用时：无\n")
+        lines.append("任务产出：无\n\n")
+    return "".join(lines)
 
 
 def generate_daily_report(all_results, author_name, since_date=None, until_date=None, branch=None):
-    """
-    生成开发日报格式的 Markdown 文档
-
-    Args:
-        all_results: 按项目分组的提交字典
-        author_name: 提交者姓名
-        since_date: 起始日期（可选）
-        until_date: 结束日期（可选）
-        branch: 分支名称（可选，用于显示）
-
-    Returns:
-        str: Markdown 格式的日报内容
-    """
+    """生成分类日报：代码开发自动填充，其余分类默认为无。"""
     lines = []
     since_date = _normalize_report_date(since_date)
     until_date = _normalize_report_date(until_date)
-    merge_skipped = 0
 
-    # 确定日期显示
     if since_date and until_date:
         if since_date == until_date:
-            # 单日报告
             date_display = f"{format_date_chinese(since_date)} ({since_date})"
         else:
-            # 区间报告
             date_display = format_date_range(since_date, until_date)
             date_display += f" ({since_date} 至 {until_date})"
     else:
-        # 使用当前日期
         report_date = datetime.now().strftime('%Y-%m-%d')
         date_display = f"{format_date_chinese(report_date)} ({report_date})"
 
-    # 标题
     lines.append(f"# {author_name} - 工作报告\n")
     lines.append(f"**日期**: {date_display}\n")
     lines.append(f"**提交者**: {author_name}\n")
     lines.append(f"**生成时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
     lines.append("\n---\n\n")
-    
-    # 按类型统计
-    commit_types = defaultdict(int)
-    commits_by_type = defaultdict(list)
-    
-    # 按项目和时间组织提交
-    project_commits = {}
-    time_range = {'start': None, 'end': None}
-    
+
+    hours_by_project = _hours_by_project(all_results, since_date, until_date, branch)
+    groups = []
     for project_path, result in all_results.items():
         project = result['project']
-        commits = result['commits']
-        
-        project_commits[project_path] = {
-            'project': project,
-            'commits': [],
-            'types': defaultdict(int)
-        }
-        
-        for commit in commits:
+        repo = _repo_clone_url(project) or project_path
+        commits = []
+        for commit in result.get('commits') or []:
             if is_merge_commit(commit.message):
-                merge_skipped += 1
                 continue
-
-            commit_type, emoji = analyze_commit_type(commit.message)
-            commit_types[commit_type] += 1
-            commits_by_type[commit_type].append({
-                'project': project_path,
-                'commit': commit
-            })
-            
-            # 解析时间（上海时区）
-            time_obj = to_local_datetime(commit.committed_date)
-            
-            if time_range['start'] is None or time_obj < time_range['start']:
-                time_range['start'] = time_obj
-            if time_range['end'] is None or time_obj > time_range['end']:
-                time_range['end'] = time_obj
-            
-            project_commits[project_path]['commits'].append({
-                'commit': commit,
-                'type': commit_type,
-                'emoji': emoji,
-                'time': time_obj
-            })
-            project_commits[project_path]['types'][commit_type] += 1
-        
-        # 按时间排序
-        project_commits[project_path]['commits'].sort(key=lambda x: x['time'], reverse=True)
-    
-    # 工作概览（提交数以过滤 Merge 后为准）
-    total_commits = sum(len(info['commits']) for info in project_commits.values())
-    total_projects = sum(1 for info in project_commits.values() if info['commits'])
-
-    lines.append("## 📊 工作概览\n\n")
-    lines.append(f"- **涉及项目**: {total_projects} 个\n")
-    lines.append(f"- **总提交数**: {total_commits} 次\n")
-    
-    if time_range['start'] and time_range['end']:
-        start_str = time_range['start'].strftime('%H:%M')
-        end_str = time_range['end'].strftime('%H:%M')
-        lines.append(f"- **工作时间**: {start_str} - {end_str}\n")
-    
-    lines.append(f"- **工作类型分布**:\n")
-    for commit_type, count in sorted(commit_types.items(), key=lambda x: x[1], reverse=True):
-        type_emoji = analyze_commit_type(commits_by_type[commit_type][0]['commit'].message)[1] if commits_by_type[commit_type] else '📌'
-        lines.append(f"  - {type_emoji} {commit_type}: {count} 次\n")
-    
-    lines.append("\n---\n\n")
-    
-    # 按项目详细工作内容
-    lines.append("## 📦 工作详情\n\n")
-    
-    for project_path in sorted(project_commits.keys()):
-        project_info = project_commits[project_path]
-        project = project_info['project']
-        commits = project_info['commits']
+            commits.append((
+                to_local_datetime(commit.committed_date),
+                repo,
+                branch or getattr(commit, 'ref_name', None) or '—',
+                (commit.id or '')[:8],
+                _clean_commit_subject(commit.message or ''),
+            ))
         if not commits:
             continue
-        
-        lines.append(f"### {project.name}\n")
-        lines.append(
-            f"**项目链接**: [{project_path}]({project.web_url}) · {len(commits)} 次\n\n"
-        )
-        lines.append("**提交记录**:\n\n")
-        
-        for idx, item in enumerate(commits, 1):
-            commit = item['commit']
-            commit_type = item['type']
-            emoji = item['emoji']
-            # 显示完整日期+时间，便于跨多天的日报查看
-            time_str = item['time'].strftime('%Y-%m-%d %H:%M')
-            
-            # 获取详细commit信息
-            try:
-                details = get_commit_details(project, commit)
-                short_message = details['short_message']
-                full_message = details['full_message']
-                stats = details['stats']
-                changed_files = details['changed_files']
-            except Exception as e:
-                logger.debug(f"获取commit详情失败: {str(e)}")
-                short_message = commit.message.split('\n')[0] if commit.message else ''
-                full_message = commit.message or ''
-                stats = None
-                changed_files = []
-            
-            commit_id = commit.id[:8]
+        commits.sort(key=lambda item: item[0], reverse=True)
+        groups.append((project_path, getattr(project, 'name', None) or project_path, commits))
+    groups.sort(key=lambda item: item[2][0][0], reverse=True)
 
-            lines.append(f"{idx}. **{emoji} [{commit_type}]** `{commit_id}` {short_message}\n")
-            lines.append(f"   - 时间: {time_str}\n")
-            
-            # 显示提交说明摘要（仅 feat/fix/perf，最多 3 行）
-            body_excerpt = _format_commit_body_excerpt(full_message, commit_type)
-            if body_excerpt:
-                lines.append(f"   - 提交说明:\n   ```\n   {body_excerpt}\n   ```\n")
-            
-            # 显示代码行数统计
-            if stats:
-                lines.append(f"   - 代码变更: +{stats.get('additions', 0)} -{stats.get('deletions', 0)} (总计: {stats.get('total', 0)} 行)\n")
-            elif hasattr(commit, 'stats') and commit.stats:
-                try:
-                    commit_stats = commit.stats
-                    if isinstance(commit_stats, dict):
-                        lines.append(f"   - 代码变更: +{commit_stats.get('additions', 0)} -{commit_stats.get('deletions', 0)}\n")
-                except Exception:
-                    logger.debug("读取commit stats属性失败")
-            
-            # 显示文件变更列表（最多显示3个）
-            if changed_files:
-                lines.append(f"   - 变更文件 ({len(changed_files)} 个): ")
-                file_paths = []
-                for file_info in changed_files[:3]:
-                    file_path = file_info.get('new_path') or file_info.get('old_path') or file_info.get('path', '')
-                    if file_path:
-                        file_paths.append(f"`{file_path}`")
-                lines.append(', '.join(file_paths))
-                if len(changed_files) > 3:
-                    lines.append(f" 等 {len(changed_files)} 个文件")
-                lines.append("\n")
-        
-        lines.append("\n---\n\n")
-    
-    # 工时分配表
-    try:
-        work_hours_data = calculate_work_hours(all_results, since_date, until_date, branch=branch)
+    if not groups:
+        lines.append("一、代码开发\n")
+        lines.append("任务类型：代码开发\n")
+        lines.append("任务用时：无\n")
+        lines.append("任务产出：无\n\n")
+        lines.append(_manual_task_blocks(2))
+        return ''.join(lines)
 
-        # 单日报告: 按项目汇总工时，避免与工作详情逐条重复
-        if since_date and until_date and since_date == until_date:
-            if since_date in work_hours_data:
-                lines.append(format_work_hours_project_summary(work_hours_data[since_date]))
-                lines.append("---\n\n")
-        # 区间报告: 显示工时汇总
-        else:
-            if work_hours_data:
-                lines.append("## ⏱️ 工时分配汇总\n\n")
-
-                # 计算工作天数和总工时
-                work_days = len(work_hours_data)
-                total_hours = sum(data['total_hours'] for data in work_hours_data.values())
-
-                lines.append(f"- **工作天数**: {work_days} 天\n")
-                lines.append(f"- **总工时**: {total_hours:.1f} 小时\n")
-                if work_days > 0:
-                    lines.append(f"- **日均工时**: {total_hours / work_days:.1f} 小时\n")
-
-                # 按项目汇总工时
-                project_hours = {}
-                for date_data in work_hours_data.values():
-                    for project_path, project_data in date_data['projects'].items():
-                        project_name = project_data['project_name']
-                        if project_name not in project_hours:
-                            project_hours[project_name] = 0
-                        project_hours[project_name] += project_data['total_hours']
-
-                if project_hours:
-                    lines.append(f"\n**按项目分布**:\n\n")
-                    lines.append("| 项目名称 | 总工时(小时) | 占比 |\n")
-                    lines.append("|---------|------------|-----|\n")
-
-                    for project_name, hours in sorted(project_hours.items(), key=lambda x: x[1], reverse=True):
-                        percentage = (hours / total_hours * 100) if total_hours > 0 else 0
-                        lines.append(f"| {project_name} | {hours:.1f} | {percentage:.1f}% |\n")
-
-                lines.append("\n---\n\n")
-
-    except Exception as e:
-        logger.warning(f"生成工时分配表时出错: {str(e)}")
-
-    # 总结
-    lines.append("## 📝 工作总结\n\n")
-
-    # 根据日期范围选择合适的文字
-    if since_date and until_date and since_date == until_date:
-        summary_text = "本日"
-    else:
-        summary_text = "本期"
-
-    summary_line = f"{summary_text}共完成 {total_commits} 次提交，涉及 {total_projects} 个项目。"
-    if merge_skipped:
-        summary_line += f"（已排除 {merge_skipped} 条分支同步提交）"
-    lines.append(summary_line + "\n")
-
-    if commit_types:
-        main_work = max(commit_types.items(), key=lambda x: x[1])
-        lines.append(f"主要工作类型为 **{main_work[0]}**（{main_work[1]} 次）。")
-
-    theme_lines = _build_daily_theme_summary(project_commits)
-    if theme_lines:
+    for index, (project_path, name, commits) in enumerate(groups, 1):
+        lines.append(f"{_cn_ordinal(index)}、{name}\n")
+        lines.append("任务类型：代码开发\n")
+        lines.append(f"任务用时：{_format_task_hours(hours_by_project.get(project_path, 0))}\n")
+        lines.append("任务产出：\n")
+        for task_index, (_time, _repo, _ref, _cid, subject) in enumerate(commits, 1):
+            if subject:
+                lines.append(f"{task_index}. {subject}\n")
+        lines.append("\n| 仓库地址 | 分支名称 | Commit ID |\n")
+        lines.append("| --- | --- | --- |\n")
+        for _time, repo, ref, commit_id, _subject in commits:
+            lines.append(f"| {repo} | {ref} | {commit_id} |\n")
         lines.append("\n")
-        for theme in theme_lines:
-            lines.append(f"- {theme}\n")
-    
-    lines.append("\n")
-    lines.append("\n---\n\n")
-    
-    # 添加代码统计信息
-    try:
-        code_stats = calculate_code_statistics(all_results, since_date, until_date)
-
-        lines.append("## 📊 代码统计\n\n")
-        if code_stats['commits_with_stats'] > 0:
-            lines.append(f"- **总新增行数**: {code_stats['total_additions']:,}\n")
-            lines.append(f"- **总删除行数**: {code_stats['total_deletions']:,}\n")
-            lines.append(f"- **净增行数**: {code_stats['net_lines']:,}\n")
-            if code_stats['net_lines'] < 0:
-                lines.append("- **说明**: 净删行以样式统一或删冗余为主，不代表工作量减少\n")
-            lines.append(f"- **平均每次提交代码行数**: {code_stats['avg_lines_per_commit']}\n")
-        else:
-            lines.append("- **代码行数统计**: 暂不可用（需要API权限）\n")
-        lines.append("\n")
-    except Exception as e:
-        logger.warning(f"生成代码统计信息时出错: {str(e)}")
-        lines.append("## 📊 代码统计\n\n")
-        lines.append("- **代码统计**: 生成时出现错误，请检查数据\n\n")
-    
+    lines.append(_manual_task_blocks(len(groups) + 1))
     return ''.join(lines)
+
+
