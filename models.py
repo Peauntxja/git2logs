@@ -31,6 +31,9 @@ class ReportParams:
     scan_all: bool = False
     repo_url: Optional[str] = None
     daily_hours: float = 8.0
+    polish_enabled: bool = False
+    polish_api_key: Optional[str] = None
+    polish_model: Optional[str] = None
 
 
 @dataclass

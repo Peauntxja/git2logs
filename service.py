@@ -283,6 +283,31 @@ class Git2LogsService:
     # 报告构建（按 output_format 分发）
     # ------------------------------------------------------------------
 
+    _POLISH_FORMATS = frozenset({"daily_report", "html", "png", "all"})
+
+    def _resolve_polish_map(self, all_results, params: ReportParams, log_callback=None):
+        if not params.polish_enabled or params.output_format not in self._POLISH_FORMATS:
+            return None
+        if not (params.polish_api_key or "").strip():
+            self._log(log_callback, "已开启 AI 润色但未填写 DeepSeek API Key，跳过润色", "warning")
+            return None
+        self._log(log_callback, "正在调用 DeepSeek 润色任务产出...", "info")
+        try:
+            from daily_polish import polish_daily_projects
+            polish_map = polish_daily_projects(
+                all_results,
+                api_key=params.polish_api_key.strip(),
+                model=params.polish_model,
+            )
+            if polish_map:
+                self._log(log_callback, f"AI 润色完成：{len(polish_map)} 个项目", "success")
+            else:
+                self._log(log_callback, "AI 润色未返回有效内容，使用原始产出", "warning")
+            return polish_map or None
+        except Exception as exc:
+            self._log(log_callback, f"AI 润色失败，回退原始产出: {exc}", "warning")
+            return None
+
     def _build_report(self, all_results, params: ReportParams, log_callback=None):
         """按 output_format 生成对应报告，返回结果字典。"""
         fmt = params.output_format
@@ -291,6 +316,7 @@ class Git2LogsService:
         until = params.until_date
         author = params.author
         branch = params.branch
+        polish_map = self._resolve_polish_map(all_results, params, log_callback)
 
         result = {
             'content': None,
@@ -300,16 +326,19 @@ class Git2LogsService:
         }
 
         if fmt == "all":
-            return self._build_all_reports(all_results, params, log_callback)
+            return self._build_all_reports(all_results, params, log_callback, polish_map=polish_map)
 
         if fmt == "statistics":
             return self._build_statistics(all_results, params, log_callback)
 
         if fmt in ("html", "png"):
-            return self._build_rendered_report(all_results, params, log_callback)
+            return self._build_rendered_report(
+                all_results, params, log_callback, polish_map=polish_map,
+            )
 
         report_content = self._generate_single_format(
             fmt, all_results, author, since, until, branch, params.daily_hours, log_callback,
+            polish_map=polish_map,
         )
 
         if report_content is None:
@@ -341,7 +370,7 @@ class Git2LogsService:
 
         return result
 
-    def _build_rendered_report(self, all_results, params, log_callback=None):
+    def _build_rendered_report(self, all_results, params, log_callback=None, polish_map=None):
         """将日报渲染为 HTML 或 PNG。"""
         from report_html import generate_html_report, parse_daily_report
 
@@ -362,6 +391,7 @@ class Git2LogsService:
             since_date=params.since_date,
             until_date=params.until_date,
             branch=params.branch,
+            polish_map=polish_map,
         )
 
         try:
@@ -387,7 +417,10 @@ class Git2LogsService:
             'work_hours_data': None,
         }
 
-    def _generate_single_format(self, fmt, all_results, author, since, until, branch, daily_hours, log_callback=None):
+    def _generate_single_format(
+        self, fmt, all_results, author, since, until, branch, daily_hours,
+        log_callback=None, polish_map=None,
+    ):
         """生成单一格式的 Markdown 内容，返回字符串或 None。"""
         self._log(log_callback, f"正在生成 {fmt} 格式...", "info")
 
@@ -402,6 +435,7 @@ class Git2LogsService:
             return generate_daily_report(
                 all_results, author,
                 since_date=since, until_date=until, branch=branch,
+                polish_map=polish_map,
             )
 
         if fmt == "work_hours":
@@ -434,7 +468,7 @@ class Git2LogsService:
             'work_hours_data': None,
         }
 
-    def _build_all_reports(self, all_results, params: ReportParams, log_callback=None):
+    def _build_all_reports(self, all_results, params: ReportParams, log_callback=None, polish_map=None):
         """批量生成所有格式。"""
         output_path = params.output_path or os.getcwd()
         self._log(log_callback, "正在批量生成所有格式...", "info")
@@ -442,6 +476,7 @@ class Git2LogsService:
         generated_files = generate_all_reports(
             all_results, params.author, output_path,
             since_date=params.since_date, until_date=params.until_date,
+            polish_map=polish_map,
         )
         self._log(log_callback, f"批量生成完成，共生成 {len(generated_files)} 个文件", "success")
 

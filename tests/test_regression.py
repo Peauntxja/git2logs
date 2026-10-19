@@ -78,6 +78,23 @@ class GoldenReportTests(unittest.TestCase):
             )
         self.assertEqual(normalize_report_text(actual), _load_expected("daily_report.md"))
 
+    def test_daily_report_applies_polish_map(self):
+        polish_map = {
+            "demo/project-a": {
+                "task_type": "功能开发、问题修复",
+                "task_output": "完成登录校验与按钮样式修复，覆盖认证与界面细节调整。",
+            }
+        }
+        actual = generate_daily_report(
+            build_sample_all_results(), AUTHOR,
+            since_date=SINCE, until_date=UNTIL, branch="main",
+            polish_map=polish_map,
+        )
+        self.assertIn("任务类型：功能开发、问题修复", actual)
+        self.assertIn("完成登录校验与按钮样式修复", actual)
+        self.assertIn("| 仓库地址 | 分支名称 | Commit ID |", actual)
+        self.assertNotIn("1. 修复按钮样式", actual)
+
     def test_work_hours_report_matches_golden(self):
         actual = generate_work_hours_report(
             build_sample_all_results(), AUTHOR,
@@ -474,6 +491,7 @@ class GuiParameterTests(unittest.TestCase):
     def test_saved_none_branch_does_not_become_branch_name(self):
         bridge = ServiceBridgeMixin()
         bridge.log = mock.Mock()
+        bridge.root = mock.Mock()
         bridge._resolve_dates_from_cached = mock.Mock(return_value=(SINCE, UNTIL))
         params = {
             "gitlab_url": "http://gitlab.example.com",
@@ -489,6 +507,27 @@ class GuiParameterTests(unittest.TestCase):
         report_params = bridge._build_report_params(params)
 
         self.assertIsNone(report_params.branch)
+
+    def test_polish_enabled_without_key_is_rejected(self):
+        bridge = ServiceBridgeMixin()
+        bridge.log = mock.Mock()
+        bridge.root = mock.Mock()
+        bridge._resolve_dates_from_cached = mock.Mock(return_value=(SINCE, UNTIL))
+        params = {
+            "gitlab_url": "http://gitlab.example.com",
+            "token": "token",
+            "author": AUTHOR,
+            "repo": "",
+            "branch": None,
+            "output_path": "/tmp",
+            "scan_all": True,
+            "output_format": "daily_report",
+            "polish_enabled": True,
+            "polish_api_key": "",
+            "polish_model": "deepseek-v4-pro",
+        }
+        with mock.patch("gui.service_bridge.messagebox"):
+            self.assertIsNone(bridge._build_report_params(params))
 
 
 class CommitAnalysisTests(unittest.TestCase):
@@ -515,6 +554,37 @@ class CommitAnalysisTests(unittest.TestCase):
 
         self.assertEqual(format_date_chinese(" 2026-06-08 "), "2026年06月08日")
         self.assertEqual(format_date_chinese("2026-08-06"), "2026年08月06日")
+
+
+class DailyPolishTests(unittest.TestCase):
+    def test_parse_polish_list_object_wrapper(self):
+        from daily_polish import _parse_polish_list
+
+        items = _parse_polish_list(
+            '{"projects":[{"project_path":"a/b","task_type":"功能开发","task_output":"完成接口联调"}]}'
+        )
+        self.assertEqual(items[0]["project_path"], "a/b")
+
+    def test_polish_daily_projects_uses_ai_response(self):
+        from daily_polish import polish_daily_projects
+
+        fake_service = mock.Mock()
+        fake_service._make_api_call.return_value = json.dumps({
+            "projects": [{
+                "project_path": "demo/project-a",
+                "task_type": "功能开发、Bug修复",
+                "task_output": "针对登录校验与按钮样式完成开发与修复。",
+            }]
+        }, ensure_ascii=False)
+
+        with (
+            mock.patch("daily_polish.get_ai_service", return_value=lambda **kwargs: fake_service),
+            mock.patch("daily_polish.get_commit_details", side_effect=_fake_commit_details),
+        ):
+            result = polish_daily_projects(build_sample_all_results(), api_key="sk-test")
+
+        self.assertEqual(result["demo/project-a"]["task_type"], "功能开发、Bug修复")
+        self.assertIn("登录校验", result["demo/project-a"]["task_output"])
 
 
 class BranchSkipTests(unittest.TestCase):

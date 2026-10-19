@@ -272,8 +272,93 @@ class DateOutputTabMixin:
                                        font=ctk.CTkFont(size=11),
                                        text_color=self.text_secondary,
                                        anchor="w")
-        self.output_hint.grid(row=3, column=0, sticky="w", padx=20, pady=(0, 20))
+        self.output_hint.grid(row=3, column=0, sticky="w", padx=20, pady=(0, 12))
         self._track_label_secondary(self.output_hint)
+
+        from ai_providers.catalog import get_provider_models
+        polish_models = get_provider_models("deepseek")
+        self.polish_enabled = ctk.BooleanVar(value=False)
+        polish_check = ctk.CTkCheckBox(
+            output_card,
+            text="AI润色任务产出",
+            variable=self.polish_enabled,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=self.text_primary,
+            fg_color=self.accent_color,
+            corner_radius=4,
+            command=self.toggle_polish_config,
+        )
+        polish_check.grid(row=4, column=0, sticky="w", padx=20, pady=(0, 8))
+        self._track_check_or_radio(polish_check)
+
+        self.polish_config_frame = ctk.CTkFrame(output_card, fg_color="transparent")
+        self.polish_config_frame.grid(row=5, column=0, sticky="ew", padx=20, pady=(0, 20))
+        self.polish_config_frame.columnconfigure(1, weight=1)
+
+        polish_model_label = ctk.CTkLabel(
+            self.polish_config_frame, text="DeepSeek 模型",
+            font=ctk.CTkFont(size=12), text_color=self.text_secondary, anchor="w",
+        )
+        polish_model_label.grid(row=0, column=0, sticky="w", pady=(0, 6))
+        self._track_label_secondary(polish_model_label)
+
+        self.polish_model = ctk.StringVar(value="deepseek-v4-pro")
+        polish_model_combo = ctk.CTkComboBox(
+            self.polish_config_frame,
+            values=polish_models or ["deepseek-v4-pro", "deepseek-v4-flash"],
+            variable=self.polish_model,
+            font=ctk.CTkFont(size=13),
+            height=34,
+            corner_radius=6,
+            border_width=1,
+            border_color=self.border_color,
+            fg_color=self.bg_card,
+            text_color=self.text_primary,
+            button_color=self.bg_card,
+            button_hover_color=self.styles.colors['hover'],
+            dropdown_fg_color=self.bg_card,
+            dropdown_text_color=self.text_primary,
+            dropdown_hover_color=self.styles.colors['hover'],
+        )
+        polish_model_combo.grid(row=0, column=1, sticky="ew", padx=(12, 0), pady=(0, 6))
+        self._track_combo(polish_model_combo)
+
+        polish_key_label = ctk.CTkLabel(
+            self.polish_config_frame, text="API Key",
+            font=ctk.CTkFont(size=12), text_color=self.text_secondary, anchor="w",
+        )
+        polish_key_label.grid(row=1, column=0, sticky="w", pady=(0, 0))
+        self._track_label_secondary(polish_key_label)
+
+        self.polish_api_key = ctk.StringVar()
+        polish_key_frame = ctk.CTkFrame(self.polish_config_frame, fg_color="transparent")
+        polish_key_frame.grid(row=1, column=1, sticky="ew", padx=(12, 0))
+        polish_key_frame.columnconfigure(0, weight=1)
+        polish_key_entry = ctk.CTkEntry(
+            polish_key_frame,
+            textvariable=self.polish_api_key,
+            show="*",
+            font=ctk.CTkFont(size=13),
+            height=34,
+            corner_radius=6,
+            border_width=1,
+            border_color=self.border_color,
+            fg_color=self.bg_card,
+            text_color=self.text_primary,
+        )
+        polish_key_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        self._track_entry(polish_key_entry, 'card')
+        polish_key_btn = ctk.CTkButton(
+            polish_key_frame, text="显示", width=80, height=34,
+            font=ctk.CTkFont(size=13), corner_radius=6,
+            fg_color=self.bg_card, text_color=self.text_primary,
+            hover_color=self.styles.colors['hover'],
+            border_width=1, border_color=self.border_color,
+            command=lambda: self.toggle_key_visibility(polish_key_entry),
+        )
+        polish_key_btn.grid(row=0, column=1)
+        self._track_outline_button(polish_key_btn)
+        self.polish_config_frame.grid_remove()
         
         # 绑定输出格式变化事件
         def setup_output_format_trace():
