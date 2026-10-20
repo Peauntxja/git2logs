@@ -28,10 +28,11 @@ _MAX_DIFF_CHARS = 240
 _MAX_PROMPT_CHARS = 14000
 
 _SYSTEM = (
-    "你是资深研发写日报助手。根据给定的 Git 提交与代码变更，为每个项目写中文日报条目。"
-    "风格参考合格工作日报：任务类型简洁专业，任务产出写成扎实长段落，体现工作量与技术细节。"
-    "必须基于输入事实展开，不得编造会议、运维、文档等无关事项，不得输出仓库表格。"
-    '只返回 JSON 对象：{"projects":[{"project_path":"...","task_type":"...","task_output":"..."}]}。'
+    "你是资深研发写日报助手。公司会统一拉取日报核算工时，文案需体现工作饱和、任务扎实、技术深度。"
+    "必须严格基于给定的 Git 提交与代码变更展开，不得编造会议、运维、文档等无关事项，不得输出仓库地址列表。"
+    "task_type 简洁专业；task_summary 一句标题简述；task_output 为 3～6 句中文长段落，"
+    "交代背景、改动点、联调/自测与结果，语气正式、信息密度高，足以支撑对应工时。"
+    '只返回 JSON：{"projects":[{"project_path":"...","task_type":"...","task_summary":"...","task_output":"..."}]}。'
 )
 
 
@@ -87,10 +88,12 @@ def _build_prompt(projects):
     return (
         "请为下列每个项目生成日报字段。\n"
         "要求：\n"
-        "1. task_type 用顿号连接的工作类型，如「功能开发、问题修复」\n"
-        "2. task_output 写成 2～5 句扎实中文长段落，综合 commit 与代码变更\n"
-        "3. project_path 必须与输入完全一致\n"
-        '4. 仅返回 JSON 对象 {"projects":[...]}\n\n'
+        "1. task_type 用顿号连接，如「功能开发、问题修复」\n"
+        "2. task_summary：一句标题简述，放入标题括号，不超过 40 字\n"
+        "3. task_output：3～6 句扎实长段落，综合 commit、文件变更与行数统计，"
+        "体现分析、实现、联调/验证与收尾，让阅读者感到当日工作饱满；禁止空话套话\n"
+        "4. project_path 必须与输入完全一致\n"
+        '5. 仅返回 JSON 对象 {"projects":[...]}\n\n'
         f"项目数据：\n{body}"
     )
 
@@ -125,7 +128,7 @@ def _parse_polish_list(text):
 
 def polish_daily_projects(all_results, api_key, model=None):
     """
-    返回 {project_path: {"task_type": str, "task_output": str}}。
+    返回 {project_path: {"task_type", "task_summary", "task_output"}}。
     无提交或失败时返回 {}。
     """
     projects = _collect_project_context(all_results)
@@ -143,10 +146,12 @@ def polish_daily_projects(all_results, api_key, model=None):
             continue
         path = (item.get("project_path") or "").strip()
         task_type = (item.get("task_type") or "").strip()
-        task_output = (item.get("task_output") or "").strip()
-        if path and task_output:
+        summary = (item.get("task_summary") or "").strip()
+        output = (item.get("task_output") or "").strip()
+        if path and (summary or output):
             result[path] = {
                 "task_type": task_type or "代码开发",
-                "task_output": task_output,
+                "task_summary": summary or (output[:40] + "…" if len(output) > 40 else output),
+                "task_output": output or summary,
             }
     return result
