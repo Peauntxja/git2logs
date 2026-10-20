@@ -26,7 +26,18 @@ def parse_daily_report(file_path):
         date = date_match.group(1).strip() if date_match else ''
         projects = {}
         commits_count = 0
+        repo_line = re.compile(r'仓库：(\S+)，分支：([^，]+)，提交ID：(\S+)')
         for line in content.splitlines():
+            match = repo_line.search(line)
+            if match:
+                repo = match.group(1).strip()
+                name = repo.rstrip('/').rsplit('/', 1)[-1]
+                if name.endswith('.git'):
+                    name = name[:-4]
+                item = projects.setdefault(repo, {'name': name, 'path': repo, 'commits': 0})
+                item['commits'] += 1
+                commits_count += 1
+                continue
             if not line.startswith('|'):
                 continue
             cells = [c.strip() for c in line.strip().strip('|').split('|')]

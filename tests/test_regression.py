@@ -82,7 +82,8 @@ class GoldenReportTests(unittest.TestCase):
         polish_map = {
             "demo/project-a": {
                 "task_type": "功能开发、问题修复",
-                "task_output": "完成登录校验与按钮样式修复，覆盖认证与界面细节调整。",
+                "task_summary": "完成登录校验与按钮样式修复",
+                "task_output": "针对登录校验与按钮样式开展联调与细节修复，完成自测并提交。",
             }
         }
         actual = generate_daily_report(
@@ -91,9 +92,13 @@ class GoldenReportTests(unittest.TestCase):
             polish_map=polish_map,
         )
         self.assertIn("任务类型：功能开发、问题修复", actual)
-        self.assertIn("完成登录校验与按钮样式修复", actual)
-        self.assertIn("| 仓库地址 | 分支名称 | Commit ID |", actual)
-        self.assertNotIn("1. 修复按钮样式", actual)
+        self.assertIn("一、Demo Project（完成登录校验与按钮样式修复）", actual)
+        self.assertIn("针对登录校验与按钮样式开展联调与细节修复", actual)
+        self.assertIn("1. 仓库：https://gitlab.example.com/demo/project-a.git，分支：main，提交ID：", actual)
+        self.assertLess(
+            actual.index("针对登录校验与按钮样式开展联调与细节修复"),
+            actual.index("1. 仓库："),
+        )
 
     def test_work_hours_report_matches_golden(self):
         actual = generate_work_hours_report(
@@ -573,7 +578,8 @@ class DailyPolishTests(unittest.TestCase):
             "projects": [{
                 "project_path": "demo/project-a",
                 "task_type": "功能开发、Bug修复",
-                "task_output": "针对登录校验与按钮样式完成开发与修复。",
+                "task_summary": "登录校验与按钮样式修复",
+                "task_output": "针对登录校验与按钮样式完成开发、联调与修复，工作饱和。",
             }]
         }, ensure_ascii=False)
 
@@ -584,7 +590,8 @@ class DailyPolishTests(unittest.TestCase):
             result = polish_daily_projects(build_sample_all_results(), api_key="sk-test")
 
         self.assertEqual(result["demo/project-a"]["task_type"], "功能开发、Bug修复")
-        self.assertIn("登录校验", result["demo/project-a"]["task_output"])
+        self.assertIn("登录校验", result["demo/project-a"]["task_summary"])
+        self.assertIn("联调", result["demo/project-a"]["task_output"])
 
 
 class BranchSkipTests(unittest.TestCase):

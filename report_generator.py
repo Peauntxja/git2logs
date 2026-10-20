@@ -841,21 +841,41 @@ def _cn_ordinal(n):
 
 def _manual_task_blocks(start):
     blocks = (
-        ("文档编写", "文档编写"),
-        ("会议讨论", "会议讨论"),
-        ("其他事项", "无"),
+        (
+            "文档编写",
+            "文档编写",
+            "【给出文档所在位置，如钉钉文档链接，公司织信链接等】",
+        ),
+        (
+            "参与会议",
+            "参与会议",
+            "【会议纪要大致内容】",
+        ),
     )
     lines = []
-    for offset, (title, task_type) in enumerate(blocks):
-        lines.append(f"{_cn_ordinal(start + offset)}、{title}\n")
+    for offset, (title, task_type, output) in enumerate(blocks):
+        lines.append(f"{_cn_ordinal(start + offset)}、{title}（对该任务的简要描述）\n")
         lines.append(f"任务类型：{task_type}\n")
-        lines.append("任务用时：无\n")
-        lines.append("任务产出：无\n\n")
+        lines.append("任务用时：\n")
+        lines.append(f"任务产出：{output}\n\n")
     return "".join(lines)
 
 
+def _brief_from_commits(commits):
+    subjects = []
+    for _time, _repo, _ref, _cid, subject in commits:
+        if subject and subject not in subjects:
+            subjects.append(subject)
+    if not subjects:
+        return "对该任务的简要描述"
+    brief = "；".join(subjects[:3])
+    if len(subjects) > 3:
+        brief += f" 等{len(subjects)}项"
+    return brief
+
+
 def generate_daily_report(all_results, author_name, since_date=None, until_date=None, branch=None, polish_map=None):
-    """生成分类日报：代码开发自动填充，其余分类默认为无。polish_map 可选注入 AI 润色。"""
+    """生成分类日报：按项目分条，纯文字仓库/分支/提交列表；polish_map 润色标题简述与任务类型。"""
     lines = []
     since_date = _normalize_report_date(since_date)
     until_date = _normalize_report_date(until_date)
@@ -899,10 +919,10 @@ def generate_daily_report(all_results, author_name, since_date=None, until_date=
     groups.sort(key=lambda item: item[2][0][0], reverse=True)
 
     if not groups:
-        lines.append("一、代码开发\n")
+        lines.append("一、代码开发（对该任务的简要描述）\n")
         lines.append("任务类型：代码开发\n")
-        lines.append("任务用时：无\n")
-        lines.append("任务产出：无\n\n")
+        lines.append("任务用时：\n")
+        lines.append("任务产出：\n\n")
         lines.append(_manual_task_blocks(2))
         return ''.join(lines)
 
@@ -910,21 +930,16 @@ def generate_daily_report(all_results, author_name, since_date=None, until_date=
     for index, (project_path, name, commits) in enumerate(groups, 1):
         polished = polish_map.get(project_path) or {}
         task_type = (polished.get("task_type") or "代码开发").strip() or "代码开发"
+        brief = (polished.get("task_summary") or "").strip() or _brief_from_commits(commits)
         task_output = (polished.get("task_output") or "").strip()
-        lines.append(f"{_cn_ordinal(index)}、{name}\n")
+        lines.append(f"{_cn_ordinal(index)}、{name}（{brief}）\n")
         lines.append(f"任务类型：{task_type}\n")
         lines.append(f"任务用时：{_format_task_hours(hours_by_project.get(project_path, 0))}\n")
         lines.append("任务产出：\n")
         if task_output:
             lines.append(f"{task_output}\n")
-        else:
-            for task_index, (_time, _repo, _ref, _cid, subject) in enumerate(commits, 1):
-                if subject:
-                    lines.append(f"{task_index}. {subject}\n")
-        lines.append("\n| 仓库地址 | 分支名称 | Commit ID |\n")
-        lines.append("| --- | --- | --- |\n")
-        for _time, repo, ref, commit_id, _subject in commits:
-            lines.append(f"| {repo} | {ref} | {commit_id} |\n")
+        for row_index, (_time, repo, ref, commit_id, _subject) in enumerate(commits, 1):
+            lines.append(f"{row_index}. 仓库：{repo}，分支：{ref}，提交ID：{commit_id}\n")
         lines.append("\n")
     lines.append(_manual_task_blocks(len(groups) + 1))
     return ''.join(lines)
