@@ -5,12 +5,12 @@
 
 ---
 
-一、Demo Project（修复按钮样式；增加登录校验）
+一、Demo Project（增加登录校验；修复按钮样式）
 任务类型：代码开发
 任务用时：8小时
 任务产出：
-1. 仓库：https://gitlab.example.com/demo/project-a.git，分支：main，提交ID：b2c3d4e5
-2. 仓库：https://gitlab.example.com/demo/project-a.git，分支：main，提交ID：a1b2c3d4
+1. 仓库：https://gitlab.example.com/demo/project-a.git，分支：main，提交ID：a1b2c3d4
+2. 仓库：https://gitlab.example.com/demo/project-a.git，分支：main，提交ID：b2c3d4e5
 
 二、文档编写（对该任务的简要描述）
 任务类型：文档编写

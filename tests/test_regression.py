@@ -491,6 +491,78 @@ class ResilienceTests(unittest.TestCase):
                     Git2LogsService._write_file(target, "new")
             self.assertEqual(target.read_text(encoding="utf-8"), "old")
 
+    def test_split_results_by_local_date(self):
+        from tests.helpers.fake_gitlab import FakeCommit, FakeProject
+
+        project = FakeProject("Demo", "https://gitlab.example.com/demo/p")
+        all_results = {
+            "demo/p": {
+                "project": project,
+                "commits": [
+                    FakeCommit("aa", "day1", "2026-01-14T16:00:00Z"),  # 上海 01-15 00:00
+                    FakeCommit("bb", "day0", "2026-01-14T10:00:00Z"),  # 上海 01-14 18:00
+                ],
+            }
+        }
+        by_date = Git2LogsService.split_results_by_local_date(all_results)
+        self.assertEqual(sorted(by_date.keys()), ["2026-01-14", "2026-01-15"])
+        self.assertEqual(len(by_date["2026-01-14"]["demo/p"]["commits"]), 1)
+        self.assertEqual(len(by_date["2026-01-15"]["demo/p"]["commits"]), 1)
+
+    def test_generate_batch_daily_reports_writes_per_day(self):
+        from tests.helpers.fake_gitlab import FakeCommit, FakeProject
+
+        project = FakeProject("Demo", "https://gitlab.example.com/demo/p")
+        all_results = {
+            "demo/p": {
+                "project": project,
+                "commits": [
+                    FakeCommit("aa", "feat: a", "2026-01-14T02:00:00Z"),
+                    FakeCommit("bb", "feat: b", "2026-01-15T02:00:00Z"),
+                    FakeCommit("cc", "feat: c", "2026-01-16T02:00:00Z"),
+                ],
+            }
+        }
+        params = ReportParams(
+            gitlab_url="http://gitlab.example.com",
+            token="t",
+            author=AUTHOR,
+            since_date="2026-01-14",
+            until_date="2026-01-15",
+            output_format="daily_report",
+            output_path="",
+            scan_all=True,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            params.output_path = tmp
+            svc = Git2LogsService()
+            with mock.patch.object(svc, "fetch_commits", return_value=all_results):
+                with mock.patch("report_generator.get_commit_details", side_effect=_fake_commit_details):
+                    result = svc.generate_batch_daily_reports(params)
+
+            self.assertEqual(result["batch_days"], 2)
+            self.assertIn("2026-01-14", result["generated_files"])
+            self.assertIn("2026-01-15", result["generated_files"])
+            self.assertNotIn("2026-01-16", result["generated_files"])
+            p14 = Path(result["generated_files"]["2026-01-14"])
+            p15 = Path(result["generated_files"]["2026-01-15"])
+            self.assertTrue(p14.is_file())
+            self.assertTrue(p15.is_file())
+            self.assertIn("提交ID：aa", p14.read_text(encoding="utf-8"))
+            self.assertIn("提交ID：bb", p15.read_text(encoding="utf-8"))
+
+    def test_generate_batch_daily_requires_dates(self):
+        params = ReportParams(
+            gitlab_url="http://gitlab.example.com",
+            token="t",
+            author=AUTHOR,
+            since_date=None,
+            until_date=None,
+            output_format="daily_report",
+        )
+        with self.assertRaises(ReportGenerationError):
+            Git2LogsService().generate_batch_daily_reports(params)
+
 
 class GuiParameterTests(unittest.TestCase):
     def test_saved_none_branch_does_not_become_branch_name(self):

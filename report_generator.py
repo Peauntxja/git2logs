@@ -914,9 +914,9 @@ def generate_daily_report(all_results, author_name, since_date=None, until_date=
             ))
         if not commits:
             continue
-        commits.sort(key=lambda item: item[0], reverse=True)
+        commits.sort(key=lambda item: item[0])
         groups.append((project_path, getattr(project, 'name', None) or project_path, commits))
-    groups.sort(key=lambda item: item[2][0][0], reverse=True)
+    groups.sort(key=lambda item: item[2][0][0])
 
     if not groups:
         lines.append("一、代码开发（对该任务的简要描述）\n")

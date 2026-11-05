@@ -218,6 +218,8 @@ class HandlersMixin:
             self.generate_btn.configure(text="⏳ 生成中...", state="disabled",
                                        fg_color=c['accent'],
                                        hover_color=c['accent_hover'])
+            if hasattr(self, "batch_daily_btn"):
+                self.batch_daily_btn.configure(state="disabled")
             if hasattr(self, "cancel_btn"):
                 self.cancel_btn.configure(state="normal")
             self._update_status("正在生成日志…", "running")
@@ -231,6 +233,8 @@ class HandlersMixin:
             self.generate_btn.configure(text="▶  开始生成", state="normal",
                                        fg_color=c['success'],
                                        hover_color=c['success_hover'])
+            if hasattr(self, "batch_daily_btn"):
+                self.batch_daily_btn.configure(state="normal")
             if hasattr(self, "cancel_btn"):
                 self.cancel_btn.configure(state="disabled")
             self._update_status("就绪", "success")
@@ -273,9 +277,18 @@ class HandlersMixin:
                 self._update_status(f"扫描项目 {completed}/{total}", "running")
             elif stage == "generate":
                 self._last_scan_progress_percent = -1
-                self._run_progress.configure(mode="indeterminate")
-                self._run_progress.start()
-                self._update_status("正在生成报告…", "running")
+                if total:
+                    self._run_progress.stop()
+                    self._run_progress.configure(mode="determinate")
+                    self._run_progress.set(completed / total if total else 0)
+                    label = f"生成日报 {completed}/{total}"
+                    if current:
+                        label = f"{label} · {current}"
+                    self._update_status(label, "running")
+                else:
+                    self._run_progress.configure(mode="indeterminate")
+                    self._run_progress.start()
+                    self._update_status("正在生成报告…", "running")
         self.root.after(0, update)
 
     _TOPBAR_META = {
@@ -559,54 +572,84 @@ class HandlersMixin:
 
         self.log("=" * 60, "info")
 
+    def _collect_generate_params(self, *, force_daily_report=False):
+        """主线程预收集 GUI 参数。"""
+        params = {
+            'gitlab_url': self.gitlab_url.get().strip(),
+            'token': self.token.get().strip(),
+            'author': self.author.get().strip(),
+            'repo': self.repo.get().strip(),
+            'branch': self.branch.get().strip() or None,
+            'use_today': self.use_today.get(),
+            'since_date': self.since_date.get().strip(),
+            'until_date': self.until_date.get().strip(),
+            'output_format': self.output_format.get() if hasattr(self, 'output_format') else "daily_report",
+            'output_path': self.output_file.get().strip() if hasattr(self, 'output_file') else '',
+            'scan_all': self.scan_all.get() if hasattr(self, 'scan_all') else True,
+            'ai_enabled': self.ai_enabled.get() if hasattr(self, 'ai_enabled') else False,
+            'ai_service': self.ai_service.get() if hasattr(self, 'ai_service') else 'openai',
+            'ai_model': self.ai_model.get() if hasattr(self, 'ai_model') else '',
+            'ai_api_key': self.ai_api_key.get().strip() if hasattr(self, 'ai_api_key') else '',
+            'ai_base_url': self.ai_base_url.get().strip() if hasattr(self, 'ai_base_url') else '',
+            'polish_enabled': self.polish_enabled.get() if hasattr(self, 'polish_enabled') else False,
+            'polish_model': self.polish_model.get() if hasattr(self, 'polish_model') else 'deepseek-v4-pro',
+            'polish_api_key': self.polish_api_key.get().strip() if hasattr(self, 'polish_api_key') else '',
+        }
+        if force_daily_report:
+            params['output_format'] = 'daily_report'
+        return params
+
     def generate_logs(self):
         """生成日志的主函数"""
-        # 防止重复点击：如果已经在运行，直接返回
         if getattr(self, '_is_running', False):
             self.log("任务正在运行中，请等待完成...", "warning")
             return
 
         try:
-            # 设置运行状态和按钮状态
             self._is_running = True
             self._set_running_state(True)
-
-            # 预收集 GUI 参数（主线程安全读取 Tk 变量）
-            self._cached_params = {
-                'gitlab_url': self.gitlab_url.get().strip(),
-                'token': self.token.get().strip(),
-                'author': self.author.get().strip(),
-                'repo': self.repo.get().strip(),
-                'branch': self.branch.get().strip() or None,
-                'use_today': self.use_today.get(),
-                'since_date': self.since_date.get().strip(),
-                'until_date': self.until_date.get().strip(),
-                'output_format': self.output_format.get() if hasattr(self, 'output_format') else "daily_report",
-                'output_path': self.output_file.get().strip() if hasattr(self, 'output_file') else '',
-                'scan_all': self.scan_all.get() if hasattr(self, 'scan_all') else True,
-                'ai_enabled': self.ai_enabled.get() if hasattr(self, 'ai_enabled') else False,
-                'ai_service': self.ai_service.get() if hasattr(self, 'ai_service') else 'openai',
-                'ai_model': self.ai_model.get() if hasattr(self, 'ai_model') else '',
-                'ai_api_key': self.ai_api_key.get().strip() if hasattr(self, 'ai_api_key') else '',
-                'ai_base_url': self.ai_base_url.get().strip() if hasattr(self, 'ai_base_url') else '',
-                'polish_enabled': self.polish_enabled.get() if hasattr(self, 'polish_enabled') else False,
-                'polish_model': self.polish_model.get() if hasattr(self, 'polish_model') else 'deepseek-v4-pro',
-                'polish_api_key': self.polish_api_key.get().strip() if hasattr(self, 'polish_api_key') else '',
-            }
+            self._cached_params = self._collect_generate_params()
             self._cancel_event = threading.Event()
             self._generation_started_at = time.monotonic()
             self._last_scan_progress_percent = -1
             self._update_task_summary(self._cached_params)
             self._save_preferences(self._cached_params)
-
-            # 使用线程启动，避免阻塞UI
-            thread = threading.Thread(target=self._run_git2logs_direct, daemon=True)
-            thread.start()
-
+            threading.Thread(target=self._run_git2logs_direct, daemon=True).start()
         except Exception as e:
             self.log(f"启动生成任务失败: {str(e)}", "error")
             self._reset_button_state()
-    
+
+    def generate_batch_daily(self):
+        """按日期区间批量生成日报（有提交的每一天一份）。"""
+        if getattr(self, '_is_running', False):
+            self.log("任务正在运行中，请等待完成...", "warning")
+            return
+
+        try:
+            self._is_running = True
+            self._set_running_state(True)
+            self._cached_params = self._collect_generate_params(force_daily_report=True)
+            if self._cached_params['use_today']:
+                self.log("批量日报请取消「使用今天」，并填写起始与结束日期", "error")
+                messagebox.showerror("错误", "批量日报请取消「使用今天」，并填写起始与结束日期")
+                self._reset_button_state()
+                return
+            if not self._cached_params['since_date'] or not self._cached_params['until_date']:
+                self.log("批量日报需要填写起始与结束日期", "error")
+                messagebox.showerror("错误", "批量日报需要填写起始与结束日期")
+                self._reset_button_state()
+                return
+            self._cancel_event = threading.Event()
+            self._generation_started_at = time.monotonic()
+            self._last_scan_progress_percent = -1
+            summary = dict(self._cached_params)
+            summary['output_format'] = 'batch_daily'
+            self._update_task_summary(summary)
+            self._save_preferences(self._cached_params)
+            threading.Thread(target=self._run_batch_daily_direct, daemon=True).start()
+        except Exception as e:
+            self.log(f"启动批量日报失败: {str(e)}", "error")
+            self._reset_button_state()
 
     def _run_git2logs_direct(self):
         """在后台线程中通过 Git2LogsService 生成报告。"""
@@ -641,6 +684,40 @@ class HandlersMixin:
             self.log(f"生成失败: {str(e)}", "error")
             self.log(traceback.format_exc(), "error")
             self.root.after(0, lambda: messagebox.showerror("错误", f"生成失败: {str(e)}"))
+        finally:
+            self._detach_gui_log_handler(gui_handler)
+            self._reset_button_state()
+
+    def _run_batch_daily_direct(self):
+        """后台线程：区间批量日报。"""
+        gui_handler = None
+        try:
+            gui_handler = self._attach_gui_log_handler()
+            self.log("=" * 60, "info")
+            params = self._cached_params
+            report_params = self._build_report_params(params)
+            if report_params is None:
+                return
+            result = self._service.generate_batch_daily_reports(
+                report_params,
+                self._service_log_callback,
+                progress_callback=self._update_generate_progress,
+                cancel_event=self._cancel_event,
+            )
+            self._apply_generate_report_result(result, params, report_params)
+        except OperationCancelled:
+            self.log("已取消批量日报，已生成的文件保留", "warning")
+            self._show_toast("已取消批量日报", "warning")
+        except GitLabConnectionError as e:
+            self.log(f"连接 GitLab 失败: {e}", "error")
+            self.root.after(0, lambda: messagebox.showerror("错误", f"连接 GitLab 失败: {e}"))
+        except ReportGenerationError as e:
+            self.log(f"批量日报失败: {e}", "error")
+            self.root.after(0, lambda: messagebox.showerror("错误", f"批量日报失败: {e}"))
+        except Exception as e:
+            self.log(f"批量日报失败: {str(e)}", "error")
+            self.log(traceback.format_exc(), "error")
+            self.root.after(0, lambda: messagebox.showerror("错误", f"批量日报失败: {str(e)}"))
         finally:
             self._detach_gui_log_handler(gui_handler)
             self._reset_button_state()
@@ -688,7 +765,10 @@ class HandlersMixin:
         branches_skipped = scan_summary.get("branches_skipped", 0)
 
         def render():
-            self._result_title.configure(text="生成完成")
+            batch_days = result.get("batch_days")
+            self._result_title.configure(
+                text=f"批量完成 · {batch_days} 份" if batch_days else "生成完成",
+            )
             suffix = f" · {failed_count} 个项目失败" if failed_count else ""
             self._result_details.configure(
                 text=(
@@ -720,7 +800,9 @@ class HandlersMixin:
                     command=command,
                 ).pack(side="left", padx=(0, 8))
             self._result_card.pack(fill="x", padx=20, pady=(0, 8), before=self._log_card)
-            self._show_toast("日报已生成", "success")
+            batch_days = result.get("batch_days")
+            toast = f"已生成 {batch_days} 份日报" if batch_days else "日报已生成"
+            self._show_toast(toast, "success")
 
         self.root.after(0, render)
 

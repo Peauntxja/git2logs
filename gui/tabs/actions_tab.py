@@ -98,12 +98,12 @@ class ActionsTabMixin:
         # 主操作按钮区域（grid 自适应布局）
         button_frame = ctk.CTkFrame(button_container, fg_color="transparent")
         button_frame.pack(fill="x")
-        button_frame.grid_columnconfigure(0, weight=2, uniform="buttons")  # 主按钮更宽
+        button_frame.grid_columnconfigure(0, weight=2, uniform="buttons")
         button_frame.grid_columnconfigure(1, weight=1, uniform="buttons")
         button_frame.grid_columnconfigure(2, weight=1, uniform="buttons")
         button_frame.grid_columnconfigure(3, weight=1, uniform="buttons")
+        button_frame.grid_columnconfigure(4, weight=1, uniform="buttons")
 
-        # 主按钮 - 生成日志
         self.generate_btn = ctk.CTkButton(button_frame,
                                         text="▶  开始生成",
                                         height=36,
@@ -115,7 +115,20 @@ class ActionsTabMixin:
                                         command=self.generate_logs)
         self.generate_btn.grid(row=0, column=0, padx=(0, self.styles.spacing['sm']), sticky="ew")
 
-        # 清空按钮
+        self.batch_daily_btn = ctk.CTkButton(button_frame,
+                                           text="批量日报",
+                                           height=36,
+                                           font=self.styles.fonts['body'](),
+                                           corner_radius=self.styles.radius['md'],
+                                           fg_color=self.bg_card,
+                                           text_color=self.text_primary,
+                                           hover_color=self.styles.colors['hover'],
+                                           border_width=1,
+                                           border_color=self.border_color,
+                                           command=self.generate_batch_daily)
+        self.batch_daily_btn.grid(row=0, column=1, padx=(0, self.styles.spacing['sm']), sticky="ew")
+        self._track_outline_button(self.batch_daily_btn)
+
         self.clear_btn = ctk.CTkButton(button_frame,
                                 text="清空",
                                 height=36,
@@ -127,7 +140,7 @@ class ActionsTabMixin:
                                 border_width=1,
                                 border_color=self.border_color,
                                 command=self.clear_logs)
-        self.clear_btn.grid(row=0, column=1, padx=(0, self.styles.spacing['sm']), sticky="ew")
+        self.clear_btn.grid(row=0, column=2, padx=(0, self.styles.spacing['sm']), sticky="ew")
 
         self.cancel_btn = ctk.CTkButton(button_frame,
                                         text="取消",
@@ -141,9 +154,8 @@ class ActionsTabMixin:
                                         border_color=self.border_color,
                                         state="disabled",
                                         command=self.cancel_generation)
-        self.cancel_btn.grid(row=0, column=2, padx=(0, self.styles.spacing['sm']), sticky="ew")
+        self.cancel_btn.grid(row=0, column=3, padx=(0, self.styles.spacing['sm']), sticky="ew")
 
-        # AI分析按钮
         self.ai_analysis_btn = ctk.CTkButton(button_frame,
                                            text="AI 分析",
                                            height=36,
@@ -156,7 +168,7 @@ class ActionsTabMixin:
                                            border_color=self.border_color,
                                            state="normal",
                                            command=self._manual_ai_analysis)
-        self.ai_analysis_btn.grid(row=0, column=3, sticky="ew")
+        self.ai_analysis_btn.grid(row=0, column=4, sticky="ew")
 
         # 绑定窗口大小变化响应式回调
         self.root.bind('<Configure>', self._on_window_resize)

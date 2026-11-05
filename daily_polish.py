@@ -126,20 +126,23 @@ def _parse_polish_list(text):
     raise ValueError("润色结果不是 JSON 数组")
 
 
-def polish_daily_projects(all_results, api_key, model=None):
-    """
-    返回 {project_path: {"task_type", "task_summary", "task_output"}}。
-    无提交或失败时返回 {}。
-    """
-    projects = _collect_project_context(all_results)
-    if not projects:
-        return {}
+_DS_POLISH_PAIR = {
+    "deepseek-v4-flash": "deepseek-v4-pro",
+    "deepseek-v4-pro": "deepseek-v4-flash",
+}
 
-    service_cls = get_ai_service("deepseek")
-    service = service_cls(api_key=api_key, model=model or "deepseek-v4-pro")
-    raw = service._make_api_call(_build_prompt(projects), _SYSTEM)
+
+def _polish_model_chain(model):
+    primary = (model or "deepseek-v4-pro").strip() or "deepseek-v4-pro"
+    chain = [primary]
+    other = _DS_POLISH_PAIR.get(primary)
+    if other:
+        chain.append(other)
+    return chain
+
+
+def _parse_polish_result(raw):
     items = _parse_polish_list(raw)
-
     result = {}
     for item in items:
         if not isinstance(item, dict):
@@ -155,3 +158,32 @@ def polish_daily_projects(all_results, api_key, model=None):
                 "task_output": output or summary,
             }
     return result
+
+
+def polish_daily_projects(all_results, api_key, model=None):
+    """
+    返回 {project_path: {"task_type", "task_summary", "task_output"}}。
+    无提交时返回 {}；flash/pro 超时或失败时自动切换另一模型，都失败则抛出最后异常。
+    """
+    projects = _collect_project_context(all_results)
+    if not projects:
+        return {}
+
+    service_cls = get_ai_service("deepseek")
+    prompt = _build_prompt(projects)
+    models = _polish_model_chain(model)
+    last_error = None
+    for index, current_model in enumerate(models):
+        try:
+            if index > 0:
+                logger.warning(
+                    "DeepSeek 润色切换模型: %s → %s（上一失败: %s）",
+                    models[0], current_model, last_error,
+                )
+            service = service_cls(api_key=api_key, model=current_model)
+            raw = service._make_api_call(prompt, _SYSTEM)
+            return _parse_polish_result(raw)
+        except Exception as exc:
+            last_error = exc
+            logger.warning("DeepSeek 润色失败 model=%s: %s", current_model, exc)
+    raise last_error

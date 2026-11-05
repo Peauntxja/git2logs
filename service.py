@@ -36,6 +36,7 @@ from report_generator import (
 )
 from work_hours import calculate_work_hours
 from commit_analysis import clear_commit_cache
+from utils.date_utils import to_local_date_str, get_date_range_days
 from models import (
     ReportParams,
     AIParams,
@@ -47,6 +48,7 @@ from models import (
     AIAnalysisError,
 )
 from config import ReportConfig, AIConfig
+from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +146,126 @@ class Git2LogsService:
         result['scan_summary'] = getattr(self, '_last_scan_summary', {})
         self._log(log_callback, f"生成完成！耗时 {time.monotonic() - started_at:.2f} 秒", "success")
         return result
+
+    @staticmethod
+    def split_results_by_local_date(all_results):
+        """按 Asia/Shanghai 日历日拆分 all_results → {date: {path: {project, commits}}}。"""
+        by_date = defaultdict(dict)
+        for project_path, result in (all_results or {}).items():
+            project = result.get("project")
+            for commit in result.get("commits") or []:
+                day = to_local_date_str(commit.committed_date)
+                bucket = by_date[day].setdefault(
+                    project_path, {"project": project, "commits": []},
+                )
+                bucket["commits"].append(commit)
+        return dict(by_date)
+
+    def generate_batch_daily_reports(
+        self,
+        params: ReportParams,
+        log_callback=None,
+        progress_callback=None,
+        cancel_event=None,
+    ) -> dict:
+        """区间批量日报：一次拉取，按有提交的日期各写一份 daily_report.md。"""
+        since = params.since_date
+        until = params.until_date
+        if not since or not until:
+            raise ReportGenerationError("批量日报需要填写起始与结束日期")
+        if since > until:
+            raise ReportGenerationError("起始日期不能晚于结束日期")
+
+        self._log(log_callback, f"开始批量生成日报：{since} 至 {until}", "info")
+        started_at = time.monotonic()
+        span_days = get_date_range_days(since, until)
+        if params.polish_enabled:
+            self._log(
+                log_callback,
+                f"已开启 AI 润色：区间约 {span_days} 天，有提交的每一天都会调用 DeepSeek，耗时与费用可能较高",
+                "warning",
+            )
+
+        self._report_progress(progress_callback, "scan", 0, 0, "")
+        all_results = self.fetch_commits(
+            params,
+            log_callback=log_callback,
+            progress_callback=progress_callback,
+            cancel_event=cancel_event,
+        )
+        self._raise_if_cancelled(cancel_event)
+
+        if not all_results:
+            self._log(log_callback, "未找到任何提交记录", "warning")
+            return {
+                "content": None,
+                "output_file": None,
+                "generated_files": {},
+                "work_hours_data": None,
+                "all_results": {},
+                "scan_summary": getattr(self, "_last_scan_summary", {}),
+                "batch_days": 0,
+            }
+
+        by_date = self.split_results_by_local_date(all_results)
+        days = sorted(d for d in by_date if since <= d <= until)
+        self._log(log_callback, f"区间内有提交的日期：{len(days)} 天", "info")
+
+        output_dir = params.output_path or os.getcwd()
+        if not os.path.isdir(output_dir):
+            output_dir = os.path.dirname(output_dir) or os.getcwd()
+        os.makedirs(output_dir, exist_ok=True)
+
+        generated = {}
+        for index, day in enumerate(days, 1):
+            self._raise_if_cancelled(cancel_event)
+            self._report_progress(progress_callback, "generate", index - 1, len(days), day)
+            day_params = ReportParams(
+                gitlab_url=params.gitlab_url,
+                token=params.token,
+                author=params.author,
+                since_date=day,
+                until_date=day,
+                branch=params.branch,
+                output_format="daily_report",
+                output_path=output_dir,
+                scan_all=params.scan_all,
+                repo_url=params.repo_url,
+                daily_hours=params.daily_hours,
+                polish_enabled=params.polish_enabled,
+                polish_api_key=params.polish_api_key,
+                polish_model=params.polish_model,
+            )
+            day_results = by_date[day]
+            polish_map = self._resolve_polish_map(day_results, day_params, log_callback)
+            content = generate_daily_report(
+                day_results,
+                params.author,
+                since_date=day,
+                until_date=day,
+                branch=params.branch,
+                polish_map=polish_map,
+            )
+            out_file = os.path.join(output_dir, f"{day}_daily_report.md")
+            self._write_file(out_file, content)
+            generated[day] = out_file
+            self._log(log_callback, f"[{index}/{len(days)}] 已生成 {out_file}", "success")
+
+        self._report_progress(progress_callback, "generate", len(days), len(days), "")
+        self._log(
+            log_callback,
+            f"批量完成：共 {len(generated)} 份日报，耗时 {time.monotonic() - started_at:.2f} 秒",
+            "success",
+        )
+        return {
+            "content": None,
+            "output_file": output_dir,
+            "generated_files": generated,
+            "work_hours_data": None,
+            "all_results": all_results,
+            "scan_summary": getattr(self, "_last_scan_summary", {}),
+            "batch_days": len(generated),
+        }
 
     # ------------------------------------------------------------------
     # 提交获取（scan_all / 单项目）
