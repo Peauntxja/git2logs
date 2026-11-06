@@ -1,5 +1,8 @@
 #!/bin/sh
 tmp=$(mktemp)
-sed '/^[[:space:]]*Co-authored-by:/d; /^[[:space:]]*Made-with:/d' "$1" > "$tmp"
+grep -viE '^[[:space:]]*(co-authored-by|made-with):' "$1" > "$tmp" || true
+if [ ! -s "$tmp" ]; then
+  echo "chore: keep commit" > "$tmp"
+fi
 mv "$tmp" "$1"
 exit 0
