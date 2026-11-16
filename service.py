@@ -70,6 +70,22 @@ class Git2LogsService:
                 logger.debug("日志回调执行失败")
 
     @staticmethod
+    def _coerce_output_dir(output_path):
+        """GUI 输出框为目录；无扩展名路径按目录处理（含误删后不存在、或误写成无后缀文件）。"""
+        path = (output_path or "").strip() or os.getcwd()
+        if not os.path.splitext(path)[1]:
+            # ponytail: 无扩展名一律当目录；若占位成文件则删掉再建目录
+            if os.path.isfile(path):
+                os.remove(path)
+            os.makedirs(path, exist_ok=True)
+            return path
+        if os.path.isdir(path):
+            return path
+        parent = os.path.dirname(path) or os.getcwd()
+        os.makedirs(parent, exist_ok=True)
+        return parent
+
+    @staticmethod
     def _resolve_output_file(output_path, report_type, since_date=None, until_date=None, suffix=".md"):
         """根据输出路径和报告类型，确定最终文件路径。"""
         if since_date and until_date and since_date == until_date:
@@ -80,8 +96,10 @@ class Git2LogsService:
         if not output_path:
             output_path = os.getcwd()
 
-        if os.path.isdir(output_path):
-            return os.path.join(output_path, f"{date_prefix}_{report_type}{suffix}")
+        # 无扩展名 / 已有目录 → 目录内生成带日期文件名
+        if os.path.isdir(output_path) or not os.path.splitext(output_path)[1]:
+            output_dir = Git2LogsService._coerce_output_dir(output_path)
+            return os.path.join(output_dir, f"{date_prefix}_{report_type}{suffix}")
 
         return output_path
 
@@ -211,10 +229,7 @@ class Git2LogsService:
         days = sorted(d for d in by_date if since <= d <= until)
         self._log(log_callback, f"区间内有提交的日期：{len(days)} 天", "info")
 
-        output_dir = params.output_path or os.getcwd()
-        if not os.path.isdir(output_dir):
-            output_dir = os.path.dirname(output_dir) or os.getcwd()
-        os.makedirs(output_dir, exist_ok=True)
+        output_dir = self._coerce_output_dir(params.output_path)
 
         generated = {}
         for index, day in enumerate(days, 1):

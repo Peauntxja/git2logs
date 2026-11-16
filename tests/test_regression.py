@@ -491,6 +491,25 @@ class ResilienceTests(unittest.TestCase):
                     Git2LogsService._write_file(target, "new")
             self.assertEqual(target.read_text(encoding="utf-8"), "old")
 
+    def test_resolve_output_file_missing_dir_gets_dated_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = Path(tmp) / "daily-log"
+            resolved = Git2LogsService._resolve_output_file(
+                str(missing), "daily_report", "2026-11-16", "2026-11-16",
+            )
+            self.assertTrue(missing.is_dir())
+            self.assertEqual(Path(resolved).name, "2026-11-16_daily_report.md")
+
+    def test_resolve_output_file_stray_file_becomes_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            stray = Path(tmp) / "daily-log"
+            stray.write_text("broken", encoding="utf-8")
+            resolved = Git2LogsService._resolve_output_file(
+                str(stray), "daily_report", "2026-11-16", "2026-11-16",
+            )
+            self.assertTrue(stray.is_dir())
+            self.assertEqual(Path(resolved).name, "2026-11-16_daily_report.md")
+
     def test_split_results_by_local_date(self):
         from tests.helpers.fake_gitlab import FakeCommit, FakeProject
 
