@@ -8,7 +8,9 @@ GitLab 客户端模块
 """
 import sys
 import os
+import ipaddress
 import logging
+import socket
 import threading
 import time
 from datetime import datetime
@@ -30,6 +32,64 @@ except ImportError:
 logger = logging.getLogger(__name__)
 _rate_limit_lock = threading.Lock()
 _rate_limit_until = 0.0
+_FAKE_IP_NET = ipaddress.ip_network("198.18.0.0/15")
+_pinned_hosts = {}
+_orig_getaddrinfo = socket.getaddrinfo
+
+
+def _pinned_getaddrinfo(host, port, *args, **kwargs):
+    return _orig_getaddrinfo(_pinned_hosts.get(host, host), port, *args, **kwargs)
+
+
+def _hosts_address(hostname):
+    try:
+        handle = open("/etc/hosts", encoding="utf-8", errors="ignore")
+    except OSError:
+        return None
+    wanted = hostname.lower()
+    with handle:
+        for raw in handle:
+            parts = raw.split("#", 1)[0].split()
+            if len(parts) >= 2 and wanted in (part.lower() for part in parts[1:]):
+                return parts[0]
+    return None
+
+
+def _is_fake_ip(address):
+    try:
+        return ipaddress.ip_address(address) in _FAKE_IP_NET
+    except ValueError:
+        return False
+
+
+def _resolved_addresses(hostname):
+    try:
+        return [item[4][0] for item in _orig_getaddrinfo(hostname, None)]
+    except OSError:
+        return []
+
+
+def _bypass_proxy_dns(gitlab_url):
+    # ponytail: 进程级 getaddrinfo 替换，只改写落到 198.18.0.0/15 的主机名。
+    # 小火箭 fake-ip 会盖住 /etc/hosts；真实地址只从 hosts 取。要按会话隔离时再换成 urllib3 adapter。
+    hostname = urlparse(gitlab_url).hostname
+    if not hostname:
+        return
+    addresses = _resolved_addresses(hostname)
+    if not any(_is_fake_ip(address) for address in addresses):
+        return
+    pinned = _hosts_address(hostname)
+    if not pinned or _is_fake_ip(pinned):
+        logger.warning(
+            "GitLab 域名 %s 被代理解析为 %s，/etc/hosts 中没有可用地址",
+            hostname,
+            ", ".join(addresses),
+        )
+        return
+    _pinned_hosts[hostname] = pinned
+    if socket.getaddrinfo is not _pinned_getaddrinfo:
+        socket.getaddrinfo = _pinned_getaddrinfo
+    logger.info("GitLab 域名 %s 避开代理假 IP，改用 %s", hostname, pinned)
 
 
 def _is_retryable_error(exc):
@@ -127,6 +187,8 @@ def create_gitlab_client(gitlab_url, token=None):
             private_token=token,
             timeout=GitLabConfig.REQUEST_TIMEOUT,
         )
+        gl.session.trust_env = False
+        _bypass_proxy_dns(gitlab_url)
         retry_gitlab_call(gl.auth, "GitLab 认证")
         logger.info(f"成功连接到 GitLab 实例: {gitlab_url}")
         return gl

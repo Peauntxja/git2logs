@@ -32,6 +32,8 @@ from report_html import generate_html_report, parse_daily_report
 from service import Git2LogsService
 from work_hours import calculate_work_hours
 from gitlab_client import (
+    _bypass_proxy_dns,
+    _pinned_hosts,
     get_all_branches,
     get_commits_by_author,
     retry_gitlab_call,
@@ -364,6 +366,16 @@ class ResilienceTests(unittest.TestCase):
         self.assertEqual(len(branches), 101)
         self.assertEqual(project.branches.list.call_args_list[0].kwargs["page"], 1)
         self.assertEqual(project.branches.list.call_args_list[1].kwargs["page"], 2)
+
+    def test_fake_ip_uses_hosts_file(self):
+        hosts = "192.168.1.80 gitlab.example.com\n"
+        _pinned_hosts.pop("gitlab.example.com", None)
+        with (
+            mock.patch("gitlab_client._resolved_addresses", return_value=["198.18.0.48"]),
+            mock.patch("builtins.open", mock.mock_open(read_data=hosts)),
+        ):
+            _bypass_proxy_dns("https://gitlab.example.com")
+        self.assertEqual(_pinned_hosts.pop("gitlab.example.com"), "192.168.1.80")
 
     def test_retryable_request_retries_then_succeeds(self):
         response_error = RuntimeError("503 service unavailable")
