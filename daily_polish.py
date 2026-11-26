@@ -6,6 +6,7 @@ import logging
 import re
 
 from ai_analysis import get_ai_service
+from ai_providers.catalog import get_provider_default_model
 from commit_analysis import get_commit_details, is_merge_commit
 
 logger = logging.getLogger(__name__)
@@ -127,13 +128,14 @@ def _parse_polish_list(text):
 
 
 _DS_POLISH_PAIR = {
+    "deepseek-flash": "deepseek-v4-pro",
+    "deepseek-v4-pro": "deepseek-flash",
     "deepseek-v4-flash": "deepseek-v4-pro",
-    "deepseek-v4-pro": "deepseek-v4-flash",
 }
 
 
 def _polish_model_chain(model):
-    primary = (model or "deepseek-v4-pro").strip() or "deepseek-v4-pro"
+    primary = (model or "").strip() or get_provider_default_model("deepseek")
     chain = [primary]
     other = _DS_POLISH_PAIR.get(primary)
     if other:

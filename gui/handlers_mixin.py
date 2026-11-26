@@ -19,6 +19,7 @@ except ImportError:
     ctk = None
 
 from config import AIConfig, GUIConfig, ReportConfig
+from ai_providers.catalog import get_provider_default_model
 from models import (
     AIAnalysisError,
     AIParams,
@@ -592,7 +593,7 @@ class HandlersMixin:
             'ai_api_key': self.ai_api_key.get().strip() if hasattr(self, 'ai_api_key') else '',
             'ai_base_url': self.ai_base_url.get().strip() if hasattr(self, 'ai_base_url') else '',
             'polish_enabled': self.polish_enabled.get() if hasattr(self, 'polish_enabled') else False,
-            'polish_model': self.polish_model.get() if hasattr(self, 'polish_model') else 'deepseek-v4-pro',
+            'polish_model': self.polish_model.get() if hasattr(self, 'polish_model') else get_provider_default_model("deepseek"),
             'polish_api_key': self.polish_api_key.get().strip() if hasattr(self, 'polish_api_key') else '',
         }
         if force_daily_report:

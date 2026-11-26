@@ -72,7 +72,7 @@ class GeminiService(BaseAIService):
                 suggestion = ""
                 if "pro" in self.model.lower():
                     suggestion = (
-                        "\n提示: Pro 模型可能需要付费配额，可尝试 gemini-3.6-flash。"
+                        f"\n提示: Pro 模型可能需要付费配额，可尝试 {get_provider_default_model('gemini')}。"
                     )
                 return ValueError(
                     f"API调用频率超限或配额已用完。请稍后重试或检查您的API配额。{suggestion}"
@@ -125,7 +125,7 @@ class GeminiService(BaseAIService):
             suggestion = ""
             if "pro" in self.model.lower():
                 suggestion = (
-                    "\n提示: 该模型可能需要付费配额，建议尝试 gemini-3.6-flash。"
+                    f"\n提示: 该模型可能需要付费配额，建议尝试 {get_provider_default_model('gemini')}。"
                 )
             return ValueError(
                 f"API调用频率超限或配额已用完。请稍后重试或检查您的API配额。{suggestion}"

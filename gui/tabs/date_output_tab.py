@@ -275,8 +275,9 @@ class DateOutputTabMixin:
         self.output_hint.grid(row=3, column=0, sticky="w", padx=20, pady=(0, 12))
         self._track_label_secondary(self.output_hint)
 
-        from ai_providers.catalog import get_provider_models
+        from ai_providers.catalog import get_provider_default_model, get_provider_models
         polish_models = get_provider_models("deepseek")
+        polish_default = get_provider_default_model("deepseek")
         self.polish_enabled = ctk.BooleanVar(value=False)
         polish_check = ctk.CTkCheckBox(
             output_card,
@@ -302,10 +303,10 @@ class DateOutputTabMixin:
         polish_model_label.grid(row=0, column=0, sticky="w", pady=(0, 6))
         self._track_label_secondary(polish_model_label)
 
-        self.polish_model = ctk.StringVar(value="deepseek-v4-pro")
+        self.polish_model = ctk.StringVar(value=polish_default)
         polish_model_combo = ctk.CTkComboBox(
             self.polish_config_frame,
-            values=polish_models or ["deepseek-v4-pro", "deepseek-v4-flash"],
+            values=polish_models or [polish_default],
             variable=self.polish_model,
             font=ctk.CTkFont(size=13),
             height=34,

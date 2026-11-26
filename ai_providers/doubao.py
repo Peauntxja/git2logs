@@ -18,4 +18,4 @@ class DoubaoService(OpenAICompatibleService):
         return "https://ark.cn-beijing.volces.com/api/v3"
 
     def _get_json_mode_models(self) -> List[str]:
-        return ['doubao-seed-2', 'doubao-seed-1', 'doubao-pro', 'doubao-lite']
+        return ['doubao-seed', 'doubao-pro', 'doubao-lite']

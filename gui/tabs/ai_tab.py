@@ -17,6 +17,7 @@ except ImportError:
     ctk = None
 
 from config import AIConfig, GUIConfig, ReportConfig
+from ai_providers.catalog import get_provider_default_model, get_provider_models
 from models import (
     AIAnalysisError,
     AIParams,
@@ -125,16 +126,9 @@ class AiTabMixin:
         model_label.grid(row=config_row, column=0, sticky="w", padx=20, pady=(0, 8))
         self._track_label_primary(model_label)
         
-        self.ai_model = ctk.StringVar(value="gpt-5.6-luna")
+        self.ai_model = ctk.StringVar(value=get_provider_default_model("openai"))
         self.ai_model_combo = ctk.CTkComboBox(self.ai_config_frame,
-                                             values=[
-                                                 "gpt-5.6-luna",
-                                                 "gpt-5.6-terra",
-                                                 "gpt-5.6-sol",
-                                                 "gpt-5.4-mini",
-                                                 "gpt-4.1-mini",
-                                                 "gpt-4o-mini",
-                                             ],
+                                             values=get_provider_models("openai"),
                                              variable=self.ai_model,
                                              font=ctk.CTkFont(size=13),
                                              height=34,

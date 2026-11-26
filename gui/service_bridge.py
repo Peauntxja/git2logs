@@ -11,6 +11,7 @@ from pathlib import Path
 from tkinter import messagebox
 
 from config import ReportConfig
+from ai_providers.catalog import get_provider_default_model
 from models import ReportParams, AIParams, ExcelParams
 
 logger = logging.getLogger(__name__)
@@ -233,7 +234,7 @@ class ServiceBridgeMixin:
 
         polish_enabled = bool(params.get('polish_enabled'))
         polish_api_key = (params.get('polish_api_key') or '').strip() or None
-        polish_model = (params.get('polish_model') or '').strip() or 'deepseek-v4-pro'
+        polish_model = (params.get('polish_model') or '').strip() or get_provider_default_model("deepseek")
         polish_formats = {'daily_report', 'html', 'png', 'all'}
         if polish_enabled and output_format in polish_formats and not polish_api_key:
             self.log("错误: 已开启 AI 润色，请填写 DeepSeek API Key", "error")
