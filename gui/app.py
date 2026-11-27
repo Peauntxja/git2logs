@@ -94,6 +94,7 @@ class Git2LogsGUI(
             self._responsive_wrap_labels: list = []
             self._resize_wrap_job = None
             self._sidebar_pill_by_tab: dict = {}
+            self._theme_switches: list = []
 
             # 配置 CustomTkinter 主题
             ctk.set_appearance_mode("dark")  # 强制暗黑模式
@@ -131,8 +132,8 @@ class Git2LogsGUI(
             self._sidebar_btns = {}
 
             # ── 底部固定操作按钮容器 ───────────────────────
-            self.bottom_actions_frame = ctk.CTkFrame(main_container, fg_color=self.styles.colors['bg_main'], corner_radius=0)
-            self.bottom_actions_frame.pack(side="bottom", fill="x", padx=0, pady=0)
+            self.bottom_actions_frame = ctk.CTkFrame(main_container, fg_color=self.styles.colors['bg_card'], corner_radius=16)
+            self.bottom_actions_frame.pack(side="bottom", fill="x", padx=16, pady=(0, 14))
 
             # ── Body: 侧边栏(左) + 右侧内容(右) ───────────
             body_frame = ctk.CTkFrame(main_container, fg_color=self.bg_main, corner_radius=0)
@@ -159,31 +160,41 @@ class Git2LogsGUI(
             right_panel.pack(side="left", fill="both", expand=True)
             self._right_panel = right_panel
 
-            # Topbar（页面标题区域，CodexPlusPlus 风格）
-            topbar = ctk.CTkFrame(right_panel, fg_color=self.styles.colors['bg_card'], height=72, corner_radius=0)
+            # Topbar（Codex 式薄工具栏 48px）
+            topbar = ctk.CTkFrame(right_panel, fg_color=self.styles.colors['bg_main'], height=48, corner_radius=0)
             topbar.pack(fill="x", side="top")
             topbar.pack_propagate(False)
             self._topbar_frame = topbar
 
             topbar_inner = ctk.CTkFrame(topbar, fg_color="transparent")
-            topbar_inner.pack(fill="both", expand=True, padx=20)
+            topbar_inner.pack(fill="both", expand=True, padx=14)
+
+            self._sidebar_toggle_btn = ctk.CTkButton(
+                topbar_inner, text="☰", width=32, height=32,
+                font=_ctk_ui_font(14), corner_radius=8,
+                fg_color="transparent",
+                text_color=self.styles.colors['text_secondary'],
+                hover_color=self.styles.colors['hover'],
+                command=self._toggle_sidebar,
+            )
+            self._sidebar_toggle_btn.pack(side="left", padx=(0, 8))
 
             topbar_text = ctk.CTkFrame(topbar_inner, fg_color="transparent")
             topbar_text.pack(side="left", fill="y", expand=False)
 
             self._topbar_title = ctk.CTkLabel(topbar_text,
                                               text="GitLab 配置",
-                                              font=_ctk_ui_font(18, "bold"),
+                                              font=_ctk_ui_font(13, "bold"),
                                               text_color=self.styles.colors['text_primary'],
                                               anchor="w")
-            self._topbar_title.pack(anchor="w", pady=(16, 2))
+            self._topbar_title.pack(side="left", pady=14)
 
             self._topbar_subtitle = ctk.CTkLabel(topbar_text,
-                                                 text="配置 GitLab 连接参数",
+                                                 text="配置 GitLab 连接与提交筛选条件",
                                                  font=_ctk_ui_font(12),
-                                                 text_color=self.styles.colors['text_secondary'],
+                                                 text_color=self.styles.colors['text_tertiary'],
                                                  anchor="w")
-            self._topbar_subtitle.pack(anchor="w")
+            self._topbar_subtitle.pack(side="left", padx=(8, 0), pady=15)
 
             topbar_sep = ctk.CTkFrame(right_panel, fg_color=self.styles.colors['border'], height=1, corner_radius=0)
             topbar_sep.pack(fill="x", side="top")
@@ -215,6 +226,7 @@ class Git2LogsGUI(
                     self._create_tab3_ai_analysis()
                     self._create_tab4_excel_export()
                     self._create_bottom_actions()
+                    self._refresh_content_theme()
                     self._load_preferences()
                     # 侧边栏（Tab内容建立后创建，确保 tab_frames 存在）
                     self._create_sidebar(self._sidebar_frame)

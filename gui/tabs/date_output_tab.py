@@ -72,19 +72,22 @@ class DateOutputTabMixin:
         
         date_row = 1
         self.use_today = ctk.BooleanVar(value=True)
-        today_check = ctk.CTkCheckBox(date_card,
-                                    text="今天",
+        ctk.CTkLabel(date_card, text="今天",
+                     font=ctk.CTkFont(size=13, weight="bold"),
+                     text_color=self.text_primary, anchor="w").grid(row=date_row, column=0, sticky="w", padx=20, pady=8)
+        today_switch = ctk.CTkSwitch(date_card, text="",
                                     variable=self.use_today,
-                                    font=ctk.CTkFont(size=13),
-                                    text_color=self.text_primary,
-                                    fg_color=self.accent_color,
-                                    corner_radius=4,
+                                    fg_color=self.styles.colors['border'],
+                                    progress_color=self.styles.colors['text_primary'],
+                                    button_color=self.styles.colors['text_secondary'],
+                                    button_hover_color=self.styles.colors['text_primary'],
                                     command=self.toggle_date_inputs)
-        today_check.grid(row=date_row, column=0, sticky="w", padx=20, pady=8)
-        self._track_check_or_radio(today_check)
-        
+        today_switch.grid(row=date_row, column=1, sticky="e", padx=(0, 20), pady=8)
+        self._track_switch(today_switch)
+        date_row += 1
+
         date_input_frame = ctk.CTkFrame(date_card, fg_color="transparent")
-        date_input_frame.grid(row=date_row, column=1, sticky="ew", padx=(0, 20))
+        date_input_frame.grid(row=date_row, column=0, columnspan=2, sticky="ew", padx=20)
         # 配置列权重，使两个日期输入框平均分配空间
         date_input_frame.columnconfigure(0, weight=1, uniform="date_inputs")
         date_input_frame.columnconfigure(1, weight=1, uniform="date_inputs")
@@ -134,7 +137,7 @@ class DateOutputTabMixin:
                                font=ctk.CTkFont(size=11),
                                text_color=self.text_secondary,
                                anchor="w")
-        date_hint.grid(row=2, column=0, columnspan=2, sticky="w", padx=20, pady=(16, 20))
+        date_hint.grid(row=3, column=0, columnspan=2, sticky="w", padx=20, pady=(16, 20))
         self._track_label_secondary(date_hint)
         
         self.toggle_date_inputs()
@@ -174,7 +177,7 @@ class DateOutputTabMixin:
         
         fmt_scroll = ctk.CTkScrollableFrame(
             format_card,
-            fg_color=self.styles.colors["bg_surface"],
+            fg_color=self.styles.colors["bg_main"],
             height=220,
             corner_radius=6,
         )
@@ -197,9 +200,9 @@ class DateOutputTabMixin:
                 value=value,
                 font=self.styles.fonts["body"](),
                 text_color=self.text_primary,
-                fg_color=self.accent_color,
-                hover_color=self.styles.colors["accent_hover"],
-                bg_color=self.styles.colors["bg_surface"],
+                fg_color=self.styles.colors['text_primary'],
+                hover_color=self.styles.colors["text_secondary"],
+                bg_color=self.styles.colors["bg_main"],
                 corner_radius=4,
             )
             rb.pack(anchor="w", padx=10, pady=5)
@@ -279,18 +282,23 @@ class DateOutputTabMixin:
         polish_models = get_provider_models("deepseek")
         polish_default = get_provider_default_model("deepseek")
         self.polish_enabled = ctk.BooleanVar(value=False)
-        polish_check = ctk.CTkCheckBox(
-            output_card,
-            text="AI润色任务产出",
+        polish_row = ctk.CTkFrame(output_card, fg_color="transparent")
+        polish_row.grid(row=4, column=0, sticky="ew", padx=20, pady=(0, 8))
+        polish_row.columnconfigure(0, weight=1)
+        ctk.CTkLabel(polish_row, text="AI润色任务产出",
+                     font=ctk.CTkFont(size=13, weight="bold"),
+                     text_color=self.text_primary, anchor="w").grid(row=0, column=0, sticky="w")
+        polish_switch = ctk.CTkSwitch(
+            polish_row, text="",
             variable=self.polish_enabled,
-            font=ctk.CTkFont(size=13, weight="bold"),
-            text_color=self.text_primary,
-            fg_color=self.accent_color,
-            corner_radius=4,
+            fg_color=self.styles.colors['border'],
+            progress_color=self.styles.colors['text_primary'],
+            button_color=self.styles.colors['text_secondary'],
+            button_hover_color=self.styles.colors['text_primary'],
             command=self.toggle_polish_config,
         )
-        polish_check.grid(row=4, column=0, sticky="w", padx=20, pady=(0, 8))
-        self._track_check_or_radio(polish_check)
+        polish_switch.grid(row=0, column=1, sticky="e")
+        self._track_switch(polish_switch)
 
         self.polish_config_frame = ctk.CTkFrame(output_card, fg_color="transparent")
         self.polish_config_frame.grid(row=5, column=0, sticky="ew", padx=20, pady=(0, 20))

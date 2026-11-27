@@ -51,18 +51,26 @@ class AiTabMixin:
         
         row = 0
         
-        # AI分析开关
+        # AI分析开关（设置行：左文案右开关）
         self.ai_enabled = ctk.BooleanVar(value=False)
-        ai_enable_check = ctk.CTkCheckBox(content,
-                                         text="启用AI分析",
+        ai_row = ctk.CTkFrame(content, fg_color="transparent")
+        ai_row.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 24))
+        ai_row.columnconfigure(0, weight=1)
+        ctk.CTkLabel(ai_row, text="启用AI分析",
+                     font=ctk.CTkFont(size=14, weight="bold"),
+                     text_color=self.text_primary, anchor="w").grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(ai_row, text="关闭时不调用任何 AI 服务",
+                     font=ctk.CTkFont(size=11),
+                     text_color=self.text_secondary, anchor="w").grid(row=1, column=0, sticky="w")
+        ai_enable_switch = ctk.CTkSwitch(ai_row, text="",
                                          variable=self.ai_enabled,
-                                         font=ctk.CTkFont(size=14, weight="bold"),
-                                         text_color=self.text_primary,
-                                         fg_color=self.accent_color,
-                                         corner_radius=4,
+                                         fg_color=self.styles.colors['border'],
+                                         progress_color=self.styles.colors['text_primary'],
+                                         button_color=self.styles.colors['text_secondary'],
+                                         button_hover_color=self.styles.colors['text_primary'],
                                          command=self.toggle_ai_config)
-        ai_enable_check.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 24))
-        self._track_check_or_radio(ai_enable_check)
+        ai_enable_switch.grid(row=0, column=1, rowspan=2, sticky="e")
+        self._track_switch(ai_enable_switch)
         row += 1
         
         # AI配置区域（默认隐藏）
@@ -214,7 +222,22 @@ class AiTabMixin:
                                             text_color=self.text_secondary,
                                             anchor="w")
         self.test_status_label.pack(side="left")
-        
+
+        row += 1
+        self.ai_analysis_btn = ctk.CTkButton(
+            content,
+            text="开始 AI 分析",
+            width=220,
+            height=44,
+            font=ctk.CTkFont(size=14, weight="bold"),
+            corner_radius=self.styles.radius['lg'],
+            fg_color=self.styles.colors['text_primary'],
+            hover_color=self.styles.colors['success_hover'],
+            text_color=self.styles.colors['bg_main'],
+            command=self._manual_ai_analysis,
+        )
+        self.ai_analysis_btn.grid(row=row, column=0, columnspan=2, sticky="w", pady=(24, 0))
+
         # 添加底部占位符
         ctk.CTkLabel(content, text="", height=50).grid(row=row+1, column=0)
         

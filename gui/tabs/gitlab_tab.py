@@ -50,7 +50,20 @@ class GitlabTabMixin:
         content.columnconfigure(0, weight=1)
         
         row = 0
-        
+
+        conn_title = ctk.CTkLabel(content, text="连接",
+                                font=ctk.CTkFont(size=15, weight="bold"),
+                                text_color=self.text_primary, anchor="w")
+        conn_title.grid(row=row, column=0, columnspan=2, sticky="w", pady=(4, 2))
+        self._track_label_primary(conn_title)
+        row += 1
+        conn_desc = ctk.CTkLabel(content, text="GitLab 实例与目标仓库；仓库留空时可自动扫描全部项目",
+                                font=self.styles.fonts['caption'](),
+                                text_color=self.text_secondary, anchor="w")
+        conn_desc.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 14))
+        self._track_label_secondary(conn_desc)
+        row += 1
+
         # GitLab URL
         url_label = ctk.CTkLabel(content, text="GitLab URL",
                                 font=ctk.CTkFont(size=14, weight="bold"),
@@ -108,32 +121,65 @@ class GitlabTabMixin:
         self._validation_labels['repo'].grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 16))
         row += 1
         
-        # 扫描所有项目选项
+        # 扫描所有项目选项（设置行：左文案右开关）
         self.scan_all = ctk.BooleanVar(value=False)
-        scan_check = ctk.CTkCheckBox(content,
-                                    text="自动扫描所有项目（不填仓库地址时启用）",
+        scan_row = ctk.CTkFrame(content, fg_color="transparent")
+        scan_row.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 24))
+        scan_row.columnconfigure(0, weight=1)
+        ctk.CTkLabel(scan_row, text="自动扫描所有项目",
+                     font=ctk.CTkFont(size=13, weight="bold"),
+                     text_color=self.text_primary, anchor="w").grid(row=0, column=0, sticky="w")
+        scan_desc = ctk.CTkLabel(scan_row, text="不填仓库地址时启用",
+                     font=self.styles.fonts['caption'](),
+                     text_color=self.text_secondary, anchor="w")
+        scan_desc.grid(row=1, column=0, sticky="w")
+        self._track_label_secondary(scan_desc)
+        scan_switch = ctk.CTkSwitch(scan_row, text="",
                                     variable=self.scan_all,
-                                    font=ctk.CTkFont(size=13),
-                                    text_color=self.text_primary,
-                                    fg_color=self.accent_color,
-                                    corner_radius=4)
-        scan_check.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 24))
-        self._track_check_or_radio(scan_check)
+                                    fg_color=self.styles.colors['border'],
+                                    progress_color=self.styles.colors['text_primary'],
+                                    button_color=self.styles.colors['text_secondary'],
+                                    button_hover_color=self.styles.colors['text_primary'])
+        scan_switch.grid(row=0, column=1, rowspan=2, sticky="e")
+        self._track_switch(scan_switch)
+        row += 1
+
+        filter_title = ctk.CTkLabel(content, text="筛选与身份",
+                                font=ctk.CTkFont(size=15, weight="bold"),
+                                text_color=self.text_primary, anchor="w")
+        filter_title.grid(row=row, column=0, columnspan=2, sticky="w", pady=(4, 2))
+        self._track_label_primary(filter_title)
+        row += 1
+        filter_desc = ctk.CTkLabel(content, text="按提交者筛选提交记录，令牌仅用于本次连接",
+                                font=self.styles.fonts['caption'](),
+                                text_color=self.text_secondary, anchor="w")
+        filter_desc.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 14))
+        self._track_label_secondary(filter_desc)
         row += 1
 
         self.show_advanced_options = ctk.BooleanVar(value=False)
-        advanced_check = ctk.CTkCheckBox(
-            content,
-            text="高级筛选",
+        adv_row = ctk.CTkFrame(content, fg_color="transparent")
+        adv_row.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 12))
+        adv_row.columnconfigure(0, weight=1)
+        ctk.CTkLabel(adv_row, text="高级筛选 · 指定分支",
+                     font=ctk.CTkFont(size=13, weight="bold"),
+                     text_color=self.text_primary, anchor="w").grid(row=0, column=0, sticky="w")
+        adv_desc = ctk.CTkLabel(adv_row, text="关闭时使用仓库默认分支",
+                     font=self.styles.fonts['caption'](),
+                     text_color=self.text_secondary, anchor="w")
+        adv_desc.grid(row=1, column=0, sticky="w")
+        self._track_label_secondary(adv_desc)
+        advanced_switch = ctk.CTkSwitch(
+            adv_row, text="",
             variable=self.show_advanced_options,
-            font=ctk.CTkFont(size=13),
-            text_color=self.text_secondary,
-            fg_color=self.accent_color,
-            corner_radius=4,
+            fg_color=self.styles.colors['border'],
+            progress_color=self.styles.colors['text_primary'],
+            button_color=self.styles.colors['text_secondary'],
+            button_hover_color=self.styles.colors['text_primary'],
             command=self._toggle_advanced_options,
         )
-        advanced_check.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 12))
-        self._track_check_or_radio(advanced_check)
+        advanced_switch.grid(row=0, column=1, rowspan=2, sticky="e")
+        self._track_switch(advanced_switch)
         row += 1
         
         # 分支
@@ -161,26 +207,34 @@ class GitlabTabMixin:
         self._track_entry(branch_entry, 'main')
         row += 1
         
-        # 提交者
-        author_label = ctk.CTkLabel(content, text="提交者",
-                                   font=ctk.CTkFont(size=14, weight="bold"),
+        # 提交者（设置行：左文案右控件）
+        author_row = ctk.CTkFrame(content, fg_color="transparent")
+        author_row.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        author_row.columnconfigure(0, weight=1)
+        author_label = ctk.CTkLabel(author_row, text="提交者",
+                                   font=ctk.CTkFont(size=13, weight="bold"),
                                    text_color=self.text_primary,
                                    anchor="w")
-        author_label.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        author_label.grid(row=0, column=0, sticky="w")
         self._track_label_primary(author_label)
-        row += 1
-        
+        author_desc = ctk.CTkLabel(author_row, text="仅统计该提交者的提交记录",
+                                   font=self.styles.fonts['caption'](),
+                                   text_color=self.text_secondary, anchor="w")
+        author_desc.grid(row=1, column=0, sticky="w")
+        self._track_label_secondary(author_desc)
+
         self.author = ctk.StringVar(value="MIZUKI")
-        author_entry = ctk.CTkEntry(content,
+        author_entry = ctk.CTkEntry(author_row,
                                    textvariable=self.author,
                                    font=ctk.CTkFont(size=13),
-                                   height=34,
-                                   corner_radius=6,
+                                   width=320,
+                                   height=36,
+                                   corner_radius=8,
                                    border_width=1,
                                    border_color=self.border_color,
-                                   fg_color=self.bg_main,
+                                   fg_color=self.styles.colors['bg_surface'],
                                    text_color=self.text_primary)
-        author_entry.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        author_entry.grid(row=0, column=1, rowspan=2, sticky="e")
         self._track_entry(author_entry, 'main')
         row += 1
         self._validation_labels['author'] = ctk.CTkLabel(
@@ -389,14 +443,17 @@ class GitlabTabMixin:
                 target_label.configure(text=message, text_color=self.styles.colors['text_secondary'])
 
     def _find_entry_by_variable(self, variable):
-        """根据变量查找对应的输入框"""
-        for widget in self.tab_frames["GitLab配置"].winfo_children():
-            if isinstance(widget, ctk.CTkFrame):
-                for child in widget.winfo_children():
-                    if isinstance(child, ctk.CTkFrame):
-                        for grandchild in child.winfo_children():
-                            if isinstance(grandchild, ctk.CTkEntry) and grandchild.cget('textvariable') == variable:
-                                return grandchild
+        """根据变量递归查找对应的输入框（适配设置行嵌套层级）"""
+        stack = list(self.tab_frames["GitLab配置"].winfo_children())
+        while stack:
+            widget = stack.pop()
+            if isinstance(widget, ctk.CTkEntry):
+                try:
+                    if widget.cget('textvariable') == variable:
+                        return widget
+                except Exception:
+                    pass
+            stack.extend(widget.winfo_children())
         return None
 
     def _find_validation_label(self, field_name):

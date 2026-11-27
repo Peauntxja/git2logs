@@ -54,7 +54,7 @@ class LayoutMixin:
             try:
                 pill.configure(
                     fg_color=c["bg_surface"] if sel else c["sidebar_bg"],
-                    border_color=c["border"] if sel else c["sidebar_bg"],
+                    border_color=c["bg_surface"] if sel else c["sidebar_bg"],
                     border_width=1,
                 )
             except Exception:
@@ -83,6 +83,15 @@ class LayoutMixin:
 
     
 
+    def _toggle_sidebar(self):
+        wrapper = getattr(self, "_sidebar_wrapper", None)
+        if wrapper is None:
+            return
+        if wrapper.winfo_ismapped():
+            wrapper.pack_forget()
+        else:
+            wrapper.pack(side="left", fill="y", before=self._right_panel)
+
     def _create_sidebar(self, parent):
         """创建左侧导航：CodexPlusPlus 风格横向文字导航，208px 宽。"""
         nav_items = [
@@ -94,44 +103,29 @@ class LayoutMixin:
 
         self._sidebar_pill_by_tab.clear()
 
-        # 品牌区
+        # 品牌区（Codex 式一行小字标）
         brand_frame = ctk.CTkFrame(parent, fg_color="transparent")
-        brand_frame.pack(fill="x", padx=10, pady=(14, 12))
+        brand_frame.pack(fill="x", padx=18, pady=(16, 14))
 
-        brand_row = ctk.CTkFrame(brand_frame, fg_color="transparent")
-        brand_row.pack(fill="x")
-
-        brand_mark = ctk.CTkFrame(brand_row,
-                                  fg_color=self.styles.colors['text_primary'],
-                                  width=36, height=36,
-                                  corner_radius=6)
-        brand_mark.pack(side="left", padx=(8, 10))
-        brand_mark.pack_propagate(False)
-        brand_mark_lbl = ctk.CTkLabel(brand_mark, text="M",
-                                      font=_ctk_ui_font(16, "bold"),
-                                      text_color=self.styles.colors['bg_main'])
-        brand_mark_lbl.pack(expand=True)
-        self._sidebar_brand_mark = brand_mark
-        self._sidebar_brand_mark_lbl = brand_mark_lbl
-
-        brand_text = ctk.CTkFrame(brand_row, fg_color="transparent")
-        brand_text.pack(side="left", fill="y")
-        self._sidebar_brand_title = ctk.CTkLabel(brand_text,
+        self._sidebar_brand_title = ctk.CTkLabel(brand_frame,
                                                  text="MIZUKI",
-                                                 font=_ctk_ui_font(14, "bold"),
+                                                 font=_ctk_ui_font(13, "bold"),
                                                  text_color=self.styles.colors['text_primary'],
                                                  anchor="w")
-        self._sidebar_brand_title.pack(anchor="w")
-        self._sidebar_brand_sub = ctk.CTkLabel(brand_text,
+        self._sidebar_brand_title.pack(side="left")
+        self._sidebar_brand_sub = ctk.CTkLabel(brand_frame,
                                                text="GitLab 工具箱",
-                                               font=_ctk_ui_font(11),
-                                               text_color=self.styles.colors['text_secondary'],
+                                               font=_ctk_ui_font(12),
+                                               text_color=self.styles.colors['text_tertiary'],
                                                anchor="w")
-        self._sidebar_brand_sub.pack(anchor="w")
+        self._sidebar_brand_sub.pack(side="left", padx=(8, 0))
+        self._sidebar_brand_mark = None
+        self._sidebar_brand_mark_lbl = None
 
-        # 品牌区底部分隔线
-        ctk.CTkFrame(parent, fg_color=self.styles.colors['border'], height=1, corner_radius=0).pack(
-            fill="x", padx=10, pady=(0, 12))
+        ctk.CTkLabel(parent, text="工作流",
+                     font=_ctk_ui_font(11, "bold"),
+                     text_color=self.styles.colors['text_tertiary'],
+                     anchor="w").pack(fill="x", padx=18, pady=(0, 6))
 
         # 导航项列表
         for tab_name, glyph, label in nav_items:
@@ -172,17 +166,34 @@ class LayoutMixin:
 
             self._sidebar_btns[tab_name] = (nav_btn, icon_lbl, text_lbl, glyph)
 
+        # 底部账户行
+        account = ctk.CTkFrame(parent, fg_color="transparent")
+        account.pack(side="bottom", fill="x", padx=14, pady=(0, 12))
+        avatar = ctk.CTkFrame(account, fg_color=self.styles.colors['bg_surface'],
+                              width=24, height=24, corner_radius=12)
+        avatar.pack(side="left")
+        avatar.pack_propagate(False)
+        ctk.CTkLabel(avatar, text="M", font=_ctk_ui_font(11, "bold"),
+                     text_color=self.styles.colors['text_primary']).pack(expand=True)
+        ctk.CTkLabel(account, text="MIZUKI · 本地运行",
+                     font=_ctk_ui_font(11),
+                     text_color=self.styles.colors['text_secondary'],
+                     anchor="w").pack(side="left", padx=(8, 0))
+        self._sidebar_account = account
+        ctk.CTkFrame(parent, fg_color=self.styles.colors['border'], height=1, corner_radius=0).pack(
+            side="bottom", fill="x", padx=10, pady=(0, 8))
+
     def _create_log_area(self, parent):
         """创建日志显示区域（放在最上方）"""
-        log_container = ctk.CTkFrame(parent, fg_color=self.styles.colors['bg_main'], corner_radius=0)
-        log_container.pack(fill="x", side="bottom", padx=0, pady=0)
+        log_container = ctk.CTkFrame(parent, fg_color=self.styles.colors['bg_card'], corner_radius=16)
+        log_container.pack(fill="x", side="bottom", padx=16, pady=(10, 0))
         self._log_container = log_container
         
         log_title_frame = ctk.CTkFrame(log_container,
-                                     fg_color=self.styles.colors['bg_main'],
+                                     fg_color=self.styles.colors['bg_card'],
                                      height=34,
                                      corner_radius=0)
-        log_title_frame.pack(fill="x", padx=20, pady=(0, 8))
+        log_title_frame.pack(fill="x", padx=12, pady=(0, 8))
         log_title_frame.pack_propagate(False)
         self._log_title_frame = log_title_frame
         
@@ -259,7 +270,7 @@ class LayoutMixin:
         log_card = ctk.CTkFrame(log_container,
                               fg_color=self.styles.colors['bg_card'],
                               corner_radius=self.styles.radius['lg'])
-        log_card.pack(fill="x", padx=20, pady=(0, 0))
+        log_card.pack(fill="x", padx=12, pady=(0, 10))
         self._log_card = log_card
         
         text_container = ctk.CTkFrame(log_card, fg_color=self.styles.colors['bg_main'], corner_radius=self.styles.radius['md'])
@@ -290,6 +301,11 @@ class LayoutMixin:
         self.log_text.tag_config("info", foreground=self.styles.colors['text_primary'])
         self.log_text.tag_config("timestamp", foreground=self.styles.colors['text_secondary'])
 
+        # 原型定案：默认收起为一行状态条，点击「展开」查看完整日志
+        self._log_card.pack_forget()
+        self._log_collapsed = True
+        self._log_toggle_btn.configure(text="展开")
+
     def _toggle_log_collapsed(self):
         """折叠/展开执行日志区域（仅影响布局，不改变业务逻辑）。"""
         if not hasattr(self, "_log_card") or not hasattr(self, "_log_toggle_btn"):
@@ -299,7 +315,7 @@ class LayoutMixin:
             self._log_card.pack_forget()
             self._log_toggle_btn.configure(text="展开")
         else:
-            self._log_card.pack(fill="x", padx=20, pady=(0, 0))
+            self._log_card.pack(fill="x", padx=12, pady=(0, 10))
             self._log_toggle_btn.configure(text="收起")
 
     def _on_log_filter_change(self, value):
@@ -339,7 +355,7 @@ class LayoutMixin:
         if hasattr(self, "_body_frame"):
             self._body_frame.configure(fg_color=c['bg_main'])
         if hasattr(self, "bottom_actions_frame"):
-            self.bottom_actions_frame.configure(fg_color=c['bg_main'])
+            self.bottom_actions_frame.configure(fg_color=c['bg_card'])
         if hasattr(self, "_right_panel"):
             self._right_panel.configure(fg_color=c['bg_main'])
         if hasattr(self, "scroll_container"):
@@ -353,7 +369,9 @@ class LayoutMixin:
                 logger.debug("主题更新: 配置滚动条颜色失败")
 
         if hasattr(self, "_topbar_frame"):
-            self._topbar_frame.configure(fg_color=c['bg_card'])
+            self._topbar_frame.configure(fg_color=c['bg_main'])
+        if hasattr(self, "_sidebar_toggle_btn"):
+            self._sidebar_toggle_btn.configure(text_color=c['text_secondary'], hover_color=c['hover'])
         if hasattr(self, "_topbar_title"):
             self._topbar_title.configure(text_color=c['text_primary'])
         if hasattr(self, "_topbar_subtitle"):
@@ -380,9 +398,9 @@ class LayoutMixin:
         self._apply_sidebar_pill_style()
 
         if hasattr(self, "_log_container"):
-            self._log_container.configure(fg_color=c['bg_main'])
+            self._log_container.configure(fg_color=c['bg_card'])
         if hasattr(self, "_log_title_frame"):
-            self._log_title_frame.configure(fg_color=c['bg_main'])
+            self._log_title_frame.configure(fg_color=c['bg_card'])
         if hasattr(self, "_log_title_lbl"):
             self._log_title_lbl.configure(text_color=c['text_primary'])
         if hasattr(self, "_log_card"):
@@ -457,6 +475,10 @@ class LayoutMixin:
         if w is not None:
             self._theme_check_radio.append(w)
 
+    def _track_switch(self, w):
+        if w is not None:
+            self._theme_switches.append(w)
+
     def _track_format_radio(self, w):
         if w is not None:
             self._theme_radio_buttons.append(w)
@@ -472,7 +494,7 @@ class LayoutMixin:
         for w in self._project_checkbox_frame.winfo_children():
             if isinstance(w, ctk.CTkCheckBox):
                 try:
-                    w.configure(text_color=c['text_primary'], fg_color=c['accent'])
+                    w.configure(text_color=c['text_primary'], fg_color=c['text_primary'])
                 except Exception:
                     logger.debug("主题更新: 配置项目复选框样式失败")
 
@@ -487,7 +509,7 @@ class LayoutMixin:
                 logger.debug("主题更新: 配置主面板背景失败")
         for w in self._theme_panels_card:
             try:
-                w.configure(fg_color=c['bg_card'], border_color=c['border'])
+                w.configure(fg_color=c['bg_main'], border_color=c['bg_main'])
             except Exception:
                 logger.debug("主题更新: 配置卡片面板样式失败")
         if hasattr(self, "_tab1_hint_frame"):
@@ -497,17 +519,16 @@ class LayoutMixin:
                 logger.debug("主题更新: 配置提示框样式失败")
         for w, surf in self._theme_entries_typed:
             try:
-                fg = c['bg_main'] if surf == 'main' else c['bg_card']
-                w.configure(fg_color=fg, border_color=c['border'], text_color=c['text_primary'])
+                w.configure(fg_color=c['bg_surface'], border_color=c['border'], text_color=c['text_primary'])
             except Exception:
                 logger.debug("主题更新: 配置输入框样式失败")
         for w in self._theme_comboboxes:
             try:
                 w.configure(
-                    fg_color=c['bg_card'],
+                    fg_color=c['bg_surface'],
                     border_color=c['border'],
                     text_color=c['text_primary'],
-                    button_color=c['bg_card'],
+                    button_color=c['bg_surface'],
                     button_hover_color=ho,
                     dropdown_fg_color=c['bg_card'],
                     dropdown_text_color=c['text_primary'],
@@ -537,17 +558,22 @@ class LayoutMixin:
                 logger.debug("主题更新: 配置次要标签文字颜色失败")
         for w in self._theme_check_radio:
             try:
-                w.configure(text_color=c['text_primary'], fg_color=c['accent'])
+                w.configure(text_color=c['text_primary'], fg_color=c['text_primary'])
             except Exception:
                 logger.debug("主题更新: 配置选择控件样式失败")
-        surf = c['bg_surface']
+        for w in self._theme_switches:
+            try:
+                w.configure(fg_color=c['border'], progress_color=c['text_primary'],
+                            button_color=c['text_secondary'], button_hover_color=c['text_primary'])
+            except Exception:
+                logger.debug("主题更新: 配置开关样式失败")
         for w in self._theme_radio_buttons:
             try:
                 w.configure(
                     text_color=c['text_primary'],
-                    fg_color=c['accent'],
-                    hover_color=c['accent_hover'],
-                    bg_color=surf,
+                    fg_color=c['text_primary'],
+                    hover_color=c['text_secondary'],
+                    bg_color=c['bg_main'],
                 )
             except Exception:
                 logger.debug("主题更新: 配置单选按钮样式失败")
@@ -562,8 +588,8 @@ class LayoutMixin:
         if hasattr(self, "_format_options_scroll"):
             try:
                 self._format_options_scroll.configure(
-                    fg_color=c['bg_surface'],
-                    scrollbar_fg_color=c['bg_card'],
+                    fg_color=c['bg_main'],
+                    scrollbar_fg_color=c['bg_main'],
                     scrollbar_button_color=c['bg_surface'],
                     scrollbar_button_hover_color=c['hover'],
                 )
@@ -571,19 +597,19 @@ class LayoutMixin:
                 logger.debug("主题更新: 配置格式选项滚动区域样式失败")
         if hasattr(self, "_bottom_separator"):
             try:
-                self._bottom_separator.configure(fg_color=c['border'])
+                self._bottom_separator.configure(fg_color=c['bg_card'])
             except Exception:
                 logger.debug("主题更新: 配置底部分隔线颜色失败")
         if hasattr(self, "_button_container_ref"):
             try:
-                self._button_container_ref.configure(fg_color=c['bg_main'])
+                self._button_container_ref.configure(fg_color=c['bg_card'])
             except Exception:
                 logger.debug("主题更新: 配置按钮容器背景失败")
         if hasattr(self, "clear_btn"):
             try:
                 self.clear_btn.configure(
-                    fg_color=c['bg_card'],
-                    text_color=c['text_primary'],
+                    fg_color="transparent",
+                    text_color=c['text_secondary'],
                     hover_color=ho,
                     border_color=c['border'],
                 )
@@ -592,10 +618,10 @@ class LayoutMixin:
         if hasattr(self, "ai_analysis_btn"):
             try:
                 self.ai_analysis_btn.configure(
-                    fg_color=c['bg_card'],
-                    text_color=c['text_primary'],
-                    hover_color=ho,
-                    border_color=c['border'],
+                    fg_color=c['text_primary'],
+                    text_color=c['bg_main'],
+                    hover_color=c['success_hover'],
+                    border_color=c['text_primary'],
                 )
             except Exception:
                 logger.debug("主题更新: 配置AI分析按钮样式失败")
@@ -609,18 +635,18 @@ class LayoutMixin:
                     )
                 else:
                     self.generate_btn.configure(
-                        fg_color=c['success'],
+                        fg_color=c['text_primary'],
                         hover_color=c['success_hover'],
-                        text_color="white",
+                        text_color=c['bg_main'],
                     )
             except Exception:
                 logger.debug("主题更新: 配置生成按钮样式失败")
         if hasattr(self, "_excel_export_btn"):
             try:
                 self._excel_export_btn.configure(
-                    fg_color=c['accent'],
-                    hover_color=c['accent_hover'],
-                    text_color="#FFFFFF",
+                    fg_color=c['text_primary'],
+                    hover_color=c['success_hover'],
+                    text_color=c['bg_main'],
                 )
             except Exception:
                 logger.debug("主题更新: 配置Excel导出按钮样式失败")

@@ -312,9 +312,9 @@ class ExcelTabMixin:
             font=ctk.CTkFont(size=15, weight="bold"),
             height=48,
             corner_radius=10,
-            fg_color=self.accent_color,
-            hover_color=self.styles.colors['accent_hover'],
-            text_color="#FFFFFF",
+            fg_color=self.styles.colors['text_primary'],
+            hover_color=self.styles.colors['success_hover'],
+            text_color=self.styles.colors['bg_main'],
             command=self._export_to_excel,
         )
         self._excel_export_btn.grid(row=row, column=0, sticky="ew", pady=(0, 30))
@@ -382,7 +382,7 @@ class ExcelTabMixin:
                 variable=var,
                 font=ctk.CTkFont(size=13),
                 text_color=self.text_primary,
-                fg_color=self.accent_color,
+                fg_color=self.styles.colors['text_primary'],
                 corner_radius=4,
             )
             cb.pack(anchor="w", pady=4)

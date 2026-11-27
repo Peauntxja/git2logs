@@ -54,19 +54,19 @@ class HandlersMixin:
         self._current_theme = "dark"
         ctk.set_appearance_mode("dark")
         UIStyles.colors.update({
-            'bg_main': "#0A0A0F",
-            'bg_card': "#0A0A0F",
-            'bg_surface': "#1A1A23",
-            'text_primary': "#FAFAFA",
-            'text_secondary': "#8B8B9E",
-            'text_tertiary': "#5A5A6E",
-            'border': "#1A1A23",
-            'hover': "#141419",
-            'success_hover': "#2BA882",
+            'bg_main': "#212121",
+            'bg_card': "#262626",
+            'bg_surface': "#2A2A2A",
+            'text_primary': "#ECECEC",
+            'text_secondary': "#AFAFAF",
+            'text_tertiary': "#858585",
+            'border': "#333333",
+            'hover': "#2F2F2F",
+            'success_hover': "#FFFFFF",
             'error_hover': "#B91C1C",
             'accent_hover': "#2BA882",
-            'sidebar_bg': "#0A0A0F",
-            'sidebar_active': "#1A1A23",
+            'sidebar_bg': "#171717",
+            'sidebar_active': "#2A2A2A",
             'chrome_border_light': "#1A1A23",
             'chrome_border_dark': "#141419",
         })
@@ -232,7 +232,8 @@ class HandlersMixin:
                     logger.debug("启动进度条动画失败")
         else:
             self.generate_btn.configure(text="▶  开始生成", state="normal",
-                                       fg_color=c['success'],
+                                       fg_color=c['text_primary'],
+                                       text_color=c['bg_main'],
                                        hover_color=c['success_hover'])
             if hasattr(self, "batch_daily_btn"):
                 self.batch_daily_btn.configure(state="normal")
@@ -293,10 +294,10 @@ class HandlersMixin:
         self.root.after(0, update)
 
     _TOPBAR_META = {
-        "GitLab配置": ("GitLab 配置", "配置 GitLab 连接参数"),
-        "日期和输出": ("日期和输出", "设置日期范围与输出格式"),
-        "AI分析": ("AI 分析", "配置 AI 分析引擎"),
-        "Excel导出": ("Excel 导出", "生成工时报表"),
+        "GitLab配置": ("GitLab 配置", "配置 GitLab 连接与提交筛选条件"),
+        "日期和输出": ("日期和输出", "设置日期范围、报告格式与保存位置"),
+        "AI分析": ("AI 分析", "配置 AI 服务并对已生成报告做智能分析"),
+        "Excel导出": ("Excel 导出", "将工时数据按模板导出为 Excel"),
     }
 
     def _switch_tab(self, tab_name):
@@ -800,7 +801,10 @@ class HandlersMixin:
                     border_color=self.styles.colors["border"],
                     command=command,
                 ).pack(side="left", padx=(0, 8))
-            self._result_card.pack(fill="x", padx=20, pady=(0, 8), before=self._log_card)
+            if getattr(self, "_log_collapsed", False):
+                self._result_card.pack(fill="x", padx=20, pady=(0, 8))
+            else:
+                self._result_card.pack(fill="x", padx=20, pady=(0, 8), before=self._log_card)
             batch_days = result.get("batch_days")
             toast = f"已生成 {batch_days} 份日报" if batch_days else "日报已生成"
             self._show_toast(toast, "success")
@@ -982,7 +986,7 @@ class HandlersMixin:
             self.root.after(0, lambda: messagebox.showerror("错误", f"AI分析失败: {str(e)}"))
         finally:
             self._ai_is_running = False
-            self._safe_button_operation("ai_analysis_btn", lambda btn: btn.configure(text="AI 分析"))
+            self._safe_button_operation("ai_analysis_btn", lambda btn: btn.configure(text="开始 AI 分析"))
             self._reset_button_state("ai_analysis_btn")
 
     def _perform_ai_analysis(self):
@@ -1053,7 +1057,7 @@ class HandlersMixin:
             self.root.after(0, lambda: messagebox.showerror("错误", f"AI分析失败: {str(e)}"))
         finally:
             self._ai_is_running = False
-            self._safe_button_operation("ai_analysis_btn", lambda btn: btn.configure(text="AI 分析"))
+            self._safe_button_operation("ai_analysis_btn", lambda btn: btn.configure(text="开始 AI 分析"))
             self._reset_button_state("ai_analysis_btn")
 
     def test_ai_connection(self):
